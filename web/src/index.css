@@ -1,0 +1,1709 @@
+/* 全局移除移动端蓝色点击高亮 - 只针对移动端 */
+@media (max-width: 768px) {
+  * {
+    -webkit-tap-highlight-color: transparent !important;
+    -webkit-focus-ring-color: transparent !important;
+  }
+}
+
+
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  background: linear-gradient(135deg, #f8fafc 0%, #ffffff 100%);
+  min-height: 100vh;
+  color: #334155;
+  line-height: 1.6;
+  -webkit-tap-highlight-color: transparent !important;
+}
+
+code {
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
+    monospace;
+}
+
+.ant-layout {
+  min-height: 100vh;
+}
+
+.site-layout-content {
+  min-height: 280px;
+  padding: 32px 24px;
+  background: transparent;
+}
+
+/* 清爽Logo设计 */
+.logo-container {
+  padding: 20px 16px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.logo {
+  text-align: center;
+  padding: 0;
+}
+
+.logo-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1f2937;
+  letter-spacing: 1px;
+  margin: 0;
+}
+
+
+
+/* === 清爽持仓卡片 === */
+.position-card-clean {
+  background: #ffffff;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  min-height: 180px;
+}
+
+.position-card-clean:hover {
+  border-color: #e5e7eb;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 头部信息 */
+.position-header-clean {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #f9fafb;
+}
+
+.position-info-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.position-symbol-clean {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  letter-spacing: -0.01em;
+}
+
+.position-badges {
+  display: flex;
+  gap: 4px;
+}
+
+.side-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  color: white;
+}
+
+.side-badge.long {
+  background: #10b981;
+}
+
+.side-badge.short {
+  background: #ef4444;
+}
+
+.leverage-badge {
+  padding: 2px 6px;
+  background: #f3f4f6;
+  color: #6b7280;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.pnl-display {
+  font-size: 18px;
+  font-weight: 700;
+  text-align: right;
+}
+
+.pnl-display.positive {
+  color: #059669;
+}
+
+.pnl-display.negative {
+  color: #dc2626;
+}
+
+/* 数据区域 */
+.position-data-section {
+  flex: 1;
+  margin-bottom: 16px;
+}
+
+.data-row {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.data-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  flex: 1;
+}
+
+.data-label {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 500;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.data-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+  text-align: center;
+}
+
+/* 控制按钮 */
+.position-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.control-group {
+  display: flex;
+  gap: 4px;
+}
+
+.control-btn {
+  flex: 1;
+  padding: 8px 6px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.primary-btn {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.primary-btn:hover {
+  background: #e0f2fe;
+  color: #0284c7;
+}
+
+.success-btn {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.success-btn:hover {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.danger-btn {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.danger-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.secondary-btn {
+  background: #f9fafb;
+  color: #6b7280;
+  font-size: 10px;
+  padding: 6px;
+}
+
+.secondary-btn:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .position-card-clean, .trading-pair-card-clean, .balance-card-clean {
+    padding: 16px;
+    margin-bottom: 12px;
+    min-height: auto;
+  }
+  
+  .position-symbol-clean, .trading-symbol-clean, .balance-asset-name {
+    font-size: 16px;
+  }
+  
+  .control-group, .trading-control-group {
+    gap: 3px;
+  }
+  
+  .control-btn, .trading-control-btn {
+    padding: 6px 4px;
+    font-size: 10px;
+  }
+  
+  .page-title-clean {
+    font-size: 16px;
+  }
+}
+
+/* === 优化组件主题 === */
+
+/* 清爽余额卡片 */
+.balance-card-clean {
+  background: #ffffff;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+}
+
+.balance-card-clean:hover {
+  border-color: #e5e7eb;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 余额头部 */
+.balance-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.balance-asset-name {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.balance-update-time {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 400;
+}
+
+/* 金额区域 */
+.balance-amount-section {
+  text-align: center;
+  margin-bottom: 12px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.balance-amount {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 4px;
+  font-feature-settings: 'tnum';
+}
+
+.balance-usdt-value {
+  font-size: 12px;
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+/* 比例显示 */
+.balance-percentage {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: auto;
+}
+
+.percentage-bar {
+  flex: 1;
+  height: 4px;
+  background: #f3f4f6;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.percentage-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.percentage-text {
+  font-size: 10px;
+  color: #6b7280;
+  font-weight: 600;
+  min-width: 30px;
+  text-align: right;
+}
+
+/* 清爽交易对卡片 */
+.trading-pair-card-clean {
+  background: #ffffff;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+  min-height: 160px;
+  display: flex;
+  flex-direction: column;
+}
+
+.trading-pair-card-clean:hover {
+  border-color: #e5e7eb;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 交易头部 */
+.trading-header-clean {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f9fafb;
+}
+
+.trading-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.trading-symbol-clean {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+  letter-spacing: -0.01em;
+}
+
+.estimate-badge {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.delete-btn-clean {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: #f9fafb;
+  color: #9ca3af;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.delete-btn-clean:hover:not(:disabled) {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.delete-btn-clean:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 价格区域 */
+.trading-price-section {
+  flex: 1;
+  margin-bottom: 16px;
+}
+
+/* 交易控制 */
+.trading-controls {
+  margin-top: auto;
+}
+
+.trading-control-group {
+  display: flex;
+  gap: 4px;
+}
+
+.trading-control-btn {
+  flex: 1;
+  padding: 8px 6px;
+  border: none;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.long-btn:not(.disabled) {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.long-btn:not(.disabled):hover {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.short-btn:not(.disabled) {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.short-btn:not(.disabled):hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+.trading-control-btn.disabled {
+  background: #f9fafb;
+  color: #9ca3af;
+  cursor: not-allowed;
+}
+
+
+
+/* 抽屉头部确认按钮 */
+.drawer-confirm-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.drawer-confirm-btn.primary {
+  background: #f0f9ff;
+  color: #0369a1;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+.drawer-confirm-btn.primary:hover {
+  background: #e0f2fe;
+  color: #0284c7;
+  border-color: rgba(14, 165, 233, 0.3);
+}
+
+.drawer-confirm-btn.success {
+  background: #f0fdf4;
+  color: #166534;
+  border: 1px solid rgba(34, 197, 94, 0.2);
+}
+
+.drawer-confirm-btn.success:hover {
+  background: #dcfce7;
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.drawer-confirm-btn.danger {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+
+.drawer-confirm-btn.danger:hover {
+  background: #fee2e2;
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+
+
+/* 交易按钮区域 */
+.trading-actions-area {
+  border-top: 1px solid rgba(148, 163, 184, 0.1);
+  padding: 16px;
+  margin-top: 8px;
+}
+
+.trading-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.trading-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  background: transparent;
+  letter-spacing: 0.01em;
+}
+
+.trading-button:hover:not(.disabled) {
+  transform: none;
+}
+
+.trading-button:active:not(.disabled) {
+  transform: scale(0.98);
+}
+
+.trading-long:not(.disabled) {
+  color: #15803d;
+  border-color: rgba(34, 197, 94, 0.2);
+}
+
+.trading-long:not(.disabled):hover {
+  background: rgba(34, 197, 94, 0.05);
+  border-color: rgba(34, 197, 94, 0.3);
+}
+
+.trading-short:not(.disabled) {
+  color: #dc2626;
+  border-color: rgba(239, 68, 68, 0.2);
+}
+
+.trading-short:not(.disabled):hover {
+  background: rgba(239, 68, 68, 0.05);
+  border-color: rgba(239, 68, 68, 0.3);
+}
+
+.trading-button.disabled {
+  color: #94a3b8;
+  border-color: rgba(148, 163, 184, 0.15);
+  cursor: not-allowed;
+  background: rgba(148, 163, 184, 0.03);
+}
+
+.enhanced-card {
+  border: 1px solid #e8e8e8;
+  background: #ffffff;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  height: 380px; /* 增加高度防止按钮溢出 */
+  width: 100%;
+  min-width: 320px; /* 增加最小宽度让卡片更宽 */
+  max-width: 100%; /* 防止溢出 */
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  position: relative;
+  box-sizing: border-box;
+}
+
+.enhanced-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
+  border-color: #d9d9d9;
+}
+
+/* 移除焦点和选中状态样式 */
+.enhanced-card:focus,
+.enhanced-card:focus-within,
+.enhanced-card.ant-card-bordered:focus,
+.enhanced-card.ant-card-bordered:focus-within,
+.enhanced-card:active,
+.enhanced-card:target,
+.enhanced-card.ant-card:focus,
+.enhanced-card.ant-card:focus-within,
+.enhanced-card.ant-card:active,
+.enhanced-card.ant-card:target {
+  border-color: #e8e8e8 !important;
+  outline: none !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+}
+
+/* 移动端特殊处理 - 移除所有可能的蓝色边框 */
+@media (max-width: 768px) {
+  .enhanced-card,
+  .enhanced-card *,
+  .ant-card,
+  .ant-card *,
+  .ant-card-bordered,
+  .trading-pair-card,
+  .trading-pair-card * {
+    -webkit-tap-highlight-color: transparent !important;
+    outline: none !important;
+    -webkit-appearance: none !important;
+    appearance: none !important;
+    -webkit-focus-ring-color: transparent !important;
+    user-select: none !important;
+  }
+  
+  .enhanced-card:hover,
+  .enhanced-card:focus,
+  .enhanced-card:active,
+  .enhanced-card:target,
+  .enhanced-card.ant-card:hover,
+  .enhanced-card.ant-card:focus,
+  .enhanced-card.ant-card:active,
+  .enhanced-card.ant-card:target,
+  .trading-pair-card:hover,
+  .trading-pair-card:focus,
+  .trading-pair-card:active,
+  .trading-pair-card:target {
+    border-color: #e8e8e8 !important;
+    outline: none !important;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+    transform: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+  
+  /* 强制移除所有可能的蓝色样式 */
+  * {
+    -webkit-tap-highlight-color: transparent !important;
+  }
+  
+  input, 
+  textarea, 
+  button, 
+  select, 
+  a,
+  div:focus,
+  div:active {
+    outline: none !important;
+    -webkit-tap-highlight-color: transparent !important;
+  }
+}
+
+
+
+/* 确保列不重叠 */
+.ant-col {
+  padding-left: 12px !important;
+  padding-right: 12px !important;
+  min-width: 340px; /* 确保每列有足够宽度 */
+}
+
+.enhanced-card .ant-card-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  height: 100%;
+  position: relative;
+}
+
+
+
+/* 右上角删除按钮样式 */
+.card-delete-btn {
+  position: absolute !important;
+  top: 12px !important;
+  right: 12px !important;
+  z-index: 10 !important;
+  width: 24px !important;
+  height: 24px !important;
+  padding: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  border-radius: 50% !important;
+  background: rgba(255, 77, 79, 0.1) !important;
+  border: 1px solid rgba(255, 77, 79, 0.2) !important;
+  color: #ff4d4f !important;
+  opacity: 0.8;
+  transition: all 0.2s ease !important;
+}
+
+.card-delete-btn:hover {
+  opacity: 1 !important;
+  background: rgba(255, 77, 79, 0.15) !important;
+  border-color: rgba(255, 77, 79, 0.4) !important;
+  transform: scale(1.1) !important;
+}
+
+.card-delete-btn .anticon {
+  font-size: 12px !important;
+}
+
+/* 价格显示区域样式 */
+.price-section {
+  background: #fafafa;
+  border-radius: 8px;
+  padding: 18px 24px;
+  margin: 8px 0;
+  border: 1px solid #f0f0f0;
+  min-height: 75px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* 买卖价格颜色优化 */
+.bid-price {
+  color: #52c41a !important;
+  font-weight: 600 !important;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace !important;
+  font-size: 13px !important;
+  letter-spacing: 0.3px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  word-break: normal !important;
+  line-height: 1.2 !important;
+}
+
+.ask-price {
+  color: #ff4d4f !important;
+  font-weight: 600 !important;
+  font-family: 'SF Mono', 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace !important;
+  font-size: 13px !important;
+  letter-spacing: 0.3px !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  word-break: normal !important;
+  line-height: 1.2 !important;
+}
+
+.trading-pair-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+/* 修复交易按钮样式 */
+.card-bottom-actions .ant-btn:focus,
+.card-bottom-actions .ant-btn:active {
+  border-color: inherit !important;
+  box-shadow: none !important;
+  outline: none !important;
+}
+
+.card-bottom-actions .ant-btn-primary:focus,
+.card-bottom-actions .ant-btn-primary:active {
+  background-color: inherit !important;
+  border-color: inherit !important;
+}
+
+.card-bottom-actions .ant-btn:hover {
+  opacity: 0.9;
+  transform: translateY(-1px);
+  transition: all 0.2s ease;
+}
+
+/* 抽屉菜单标题样式 */
+.ant-drawer .ant-drawer-title {
+  color: #ffffff;
+  font-weight: 500;
+  font-size: 16px;
+  letter-spacing: 1px;
+}
+
+/* 移动端优化 */
+@media (max-width: 768px) {
+  .ant-layout-content {
+    padding: 16px 8px !important;
+    margin: 16px 8px !important;
+  }
+  
+  .position-actions {
+    flex-direction: column;
+  }
+  
+  .position-actions .ant-btn {
+    margin-bottom: 4px;
+  }
+  
+  .asset-card {
+    padding: 12px;
+  }
+  
+  .logo-container {
+    padding: 20px 12px;
+    margin-bottom: 12px;
+  }
+  
+  .logo-title {
+    font-size: 16px;
+    letter-spacing: 1px;
+  }
+  
+  .ant-statistic-title {
+    font-size: 12px !important;
+  }
+  
+  .ant-statistic-content {
+    font-size: 18px !important;
+  }
+  
+  .ant-card-head-title {
+    font-size: 16px !important;
+  }
+  
+  .ant-typography h2 {
+    font-size: 20px !important;
+    margin-bottom: 16px !important;
+  }
+  
+  .ant-typography h4 {
+    font-size: 14px !important;
+    margin-bottom: 8px !important;
+  }
+
+  .ant-col {
+    min-width: 300px; /* 移动端列最小宽度 */
+    padding-left: 16px !important;
+    padding-right: 16px !important;
+  }
+}
+
+/* 小屏幕手机优化 */
+@media (max-width: 480px) {
+  .ant-layout-content {
+    padding: 12px 4px !important;
+    margin: 12px 4px !important;
+  }
+  
+  .ant-card {
+    margin-bottom: 12px;
+  }
+  
+  .ant-card-body {
+    padding: 12px !important;
+  }
+
+  .ant-col {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+    min-width: 280px;
+  }
+  
+  .position-actions .ant-space-item {
+    width: 100%;
+  }
+  
+  .position-actions .ant-btn {
+    width: 100%;
+    margin-bottom: 8px;
+  }
+  
+  .asset-amount {
+    font-size: 18px !important;
+  }
+  
+  .ant-drawer-body {
+    padding: 16px !important;
+  }
+
+  .card-bottom-actions .ant-btn {
+    height: 40px !important;
+    font-size: 14px !important;
+    margin-bottom: 4px !important;
+  }
+  
+  .price-section {
+    padding: 14px 16px !important;
+    min-height: 60px !important;
+    margin: 6px 0 !important;
+  }
+  
+  .bid-price, .ask-price {
+    font-size: 12px !important;
+    letter-spacing: 0.2px !important;
+  }
+  
+  .ant-slider {
+    margin: 12px 0 !important;
+  }
+}
+
+/* K线图表移动端优化 */
+@media (max-width: 768px) {
+  /* 图表容器 */
+  .kline-chart-container {
+    min-height: 300px !important;
+    height: calc(100vh - 200px) !important;
+  }
+  
+  /* 工具栏在移动端的间距调整 */
+  .chart-toolbar-mobile {
+    padding: 8px 12px !important;
+    gap: 8px !important;
+    border: none !important;
+    outline: none !important;
+  }
+  
+  /* 时间周期按钮移动端优化 */
+  .time-interval-buttons {
+    justify-content: space-between !important;
+    width: 100% !important;
+  }
+  
+  /* 价格监听下拉菜单移动端优化 */
+  .ant-dropdown .ant-dropdown-menu {
+    max-width: calc(100vw - 20px) !important;
+    width: auto !important;
+    max-height: 280px !important;
+    font-size: 13px !important;
+  }
+  
+  .ant-dropdown .ant-dropdown-menu-item {
+    padding: 10px 12px !important;
+    line-height: 1.3 !important;
+  }
+  
+  .ant-dropdown .ant-dropdown-menu-item .ant-badge {
+    font-size: 11px !important;
+  }
+  
+  .ant-dropdown .ant-dropdown-menu-item .ant-switch {
+    min-width: 36px !important;
+    height: 18px !important;
+  }
+  
+  /* 指标面板移动端优化 */
+  .ant-drawer.indicator-panel-mobile .ant-drawer-body {
+    padding: 12px !important;
+  }
+  
+  /* 移除所有可能的焦点和选中状态的边框 */
+  .ant-select:focus,
+  .ant-select-focused,
+  .ant-select:hover,
+  .ant-btn:focus,
+  .ant-btn:active,
+  .ant-btn:hover,
+  .ant-dropdown:focus,
+  .ant-dropdown:active,
+  div:focus,
+  div:active {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+  
+  /* 移动端工具栏布局优化 */
+  .kline-chart-container .ant-select {
+    min-width: 100px !important;
+  }
+  
+  /* 价格监听标识在移动端的优化 */
+  .price-monitoring-badge {
+    font-size: 11px !important;
+    padding: 2px 6px !important;
+    font-weight: 500 !important;
+  }
+  
+  /* 移动端按钮组适中间距布局 */
+  .chart-function-buttons {
+    gap: 6px !important;
+    flex-wrap: wrap !important;
+  }
+  
+  /* 移动端时间周期按钮优化 */
+  .interval-buttons-mobile {
+    width: 100% !important;
+    justify-content: space-evenly !important;
+    gap: 4px !important;
+  }
+  
+  /* 移动端时间周期按钮大小 */
+  .interval-buttons-mobile button {
+    min-width: 32px !important;
+    min-height: 32px !important;
+    padding: 6px 10px !important;
+    font-size: 13px !important;
+  }
+  
+  /* 移动端图表工具栏垂直布局间距 */
+  .chart-toolbar-vertical {
+    gap: 6px !important;
+    padding: 6px 8px !important;
+  }
+  
+  /* 修复Select组件在移动端的垂直对齐 */
+  .ant-select.ant-select-borderless {
+    height: auto !important;
+  }
+  
+  .ant-select.ant-select-borderless .ant-select-selector {
+    height: 32px !important;
+    display: flex !important;
+    align-items: center !important;
+    border: none !important;
+  }
+  
+  /* 确保所有工具栏元素垂直居中 */
+  .chart-toolbar-item {
+    display: flex !important;
+    align-items: center !important;
+    height: 32px !important;
+  }
+}
+
+/* 超小屏幕设备 */
+@media (max-width: 480px) {
+  .kline-chart-container {
+    min-height: 250px !important;
+    height: calc(100vh - 180px) !important;
+  }
+  
+  /* 移动端工具栏按钮更大更易点击 */
+  .chart-toolbar-mobile button {
+    min-width: 40px !important;
+    min-height: 40px !important;
+    padding: 8px 12px !important;
+    font-size: 14px !important;
+  }
+}
+
+/* 触摸设备优化 */
+@media (hover: none) and (pointer: coarse) {
+  .ant-btn {
+    min-height: 44px;
+  }
+  
+  .ant-input {
+    min-height: 44px;
+  }
+  
+  .ant-select-selector {
+    min-height: 44px !important;
+  }
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* === 清爽侧边栏主题 === */
+
+/* 侧边栏菜单 */
+.sidebar-menu-clean.ant-menu-light {
+  background: transparent;
+  border: none;
+}
+
+.sidebar-menu-clean .ant-menu-item {
+  background: transparent;
+  border-radius: 8px;
+  margin: 3px 12px;
+  padding: 0 16px;
+  height: 40px;
+  line-height: 40px;
+  color: #6b7280;
+  transition: all 0.15s ease;
+  border: none;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.sidebar-menu-clean .ant-menu-item:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.sidebar-menu-clean .ant-menu-item.ant-menu-item-selected {
+  background: #f0f9ff;
+  color: #0369a1;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+.sidebar-menu-clean .ant-menu-item.ant-menu-item-selected:hover {
+  background: #e0f2fe;
+  color: #0284c7;
+  border-color: rgba(14, 165, 233, 0.3);
+}
+
+.sidebar-menu-clean .ant-menu-item .anticon {
+  font-size: 14px;
+  margin-right: 10px;
+  color: inherit;
+}
+
+/* 收缩状态 */
+.ant-layout-sider-collapsed .sidebar-menu-clean .ant-menu-item {
+  margin: 3px 8px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+}
+
+.ant-layout-sider-collapsed .sidebar-menu-clean .ant-menu-item .anticon {
+  margin-right: 0;
+  font-size: 16px;
+}
+
+/* 移动端抽屉菜单 */
+.ant-drawer .sidebar-menu-clean .ant-menu-item {
+  background: transparent;
+  border-radius: 8px;
+  margin: 3px 12px;
+  padding: 0 16px;
+  height: 40px;
+  line-height: 40px;
+  color: #6b7280;
+  transition: all 0.15s ease;
+  font-weight: 500;
+}
+
+.ant-drawer .sidebar-menu-clean .ant-menu-item:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.ant-drawer .sidebar-menu-clean .ant-menu-item.ant-menu-item-selected {
+  background: #f0f9ff;
+  color: #0369a1;
+  border: 1px solid rgba(14, 165, 233, 0.2);
+}
+
+/* 侧边栏滚动条 */
+.ant-layout-sider::-webkit-scrollbar {
+  width: 3px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb {
+  background: rgba(107, 114, 128, 0.2);
+  border-radius: 2px;
+}
+
+.ant-layout-sider::-webkit-scrollbar-thumb:hover {
+  background: rgba(107, 114, 128, 0.3);
+}
+
+/* 加载动画 */
+.ant-spin-spinning {
+  background-color: rgba(255, 255, 255, 0.8);
+}
+
+/* === 统一卡片主题 === */
+.ant-card {
+  background: #ffffff;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.ant-card:hover {
+  border-color: #e5e7eb;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 页面头部主题 */
+.ant-typography h1, .ant-typography h2, .ant-typography h3, .ant-typography h4 {
+  color: #374151 !important;
+  font-weight: 500 !important;
+  letter-spacing: -0.01em;
+}
+
+/* 清爽页面标题 */
+.page-title-clean {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+/* 分类标题 */
+.category-title-clean {
+  font-size: 16px;
+  font-weight: 500;
+  color: #6b7280;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+/* 登录页面标题 */
+.login-title-clean {
+  font-size: 20px;
+  font-weight: 600;
+  color: #0369a1;
+  margin-bottom: 8px;
+}
+
+/* 资产标题 */
+.asset-title-clean {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* 统一按钮主题 */
+.ant-btn-primary {
+  background: #f0f9ff;
+  border: 1px solid #93c5fd;
+  border-radius: 8px;
+  color: #0369a1;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.ant-btn-primary:hover {
+  background: #e0f2fe !important;
+  border-color: #7dd3fc !important;
+  color: #0284c7 !important;
+}
+
+.ant-btn-default {
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  color: #6b7280;
+  font-weight: 500;
+  transition: all 0.15s ease;
+}
+
+.ant-btn-default:hover {
+  background: #f3f4f6 !important;
+  border-color: #d1d5db !important;
+  color: #374151 !important;
+}
+
+/* 抽屉主题 */
+.ant-drawer .ant-drawer-header {
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 24px;
+}
+
+.ant-drawer .ant-drawer-title {
+  color: #1f2937;
+  font-weight: 600;
+  font-size: 16px;
+}
+
+.ant-drawer .ant-drawer-body {
+  background: #ffffff;
+  padding: 24px;
+}
+
+/* 标签主题 */
+.ant-tag {
+  border-radius: 6px;
+  font-weight: 500;
+  border: none;
+  font-size: 11px;
+  padding: 4px 8px;
+}
+
+.ant-tag-green {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.ant-tag-red {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.ant-tag-blue {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+
+
+/* 空状态主题 */
+.ant-empty {
+  color: #64748b;
+}
+
+.ant-empty-description {
+  color: #94a3b8;
+  font-weight: 500;
+}
+
+
+
+
+
+/* 按钮组响应式 */
+.ant-space-wrap {
+  justify-content: center;
+}
+
+@media (max-width: 576px) {
+  .ant-space-wrap {
+    justify-content: stretch;
+  }
+  
+  .ant-space-wrap .ant-space-item {
+    flex: 1;
+  }
+}
+
+/* 价格监听详情抽屉样式优化 */
+.monitoring-drawer .ant-drawer-body {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.monitoring-drawer .ant-drawer-body > div {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+/* 监听列表容器优化 */
+.monitoring-list-container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.monitoring-list-content {
+  flex: 1;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+/* 清爽监听卡片 */
+.monitoring-card-clean {
+  background: #ffffff;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 14px;
+  margin-bottom: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: all 0.2s ease;
+}
+
+.monitoring-card-clean:hover {
+  border-color: #e5e7eb;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+
+/* 监听头部 */
+.monitoring-header-clean {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #f9fafb;
+}
+
+.monitoring-info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.monitoring-action-tag {
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.monitoring-action-tag.add_position {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.monitoring-action-tag.take_profit {
+  background: #f0fdf4;
+  color: #166534;
+}
+
+.monitoring-action-tag.stop_loss {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.monitoring-order-type {
+  padding: 2px 6px;
+  background: #f3f4f6;
+  color: #6b7280;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.monitoring-delete-btn {
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: #f9fafb;
+  color: #9ca3af;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+
+.monitoring-delete-btn:hover {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* 价格信息区域 */
+.monitoring-price-section {
+  margin-bottom: 12px;
+}
+
+.price-row.main-prices {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.price-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  flex: 1;
+}
+
+.price-label {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 500;
+  margin-bottom: 4px;
+  text-transform: uppercase;
+}
+
+.price-value {
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.price-value.current {
+  color: #059669;
+}
+
+.price-value.target {
+  color: #1f2937;
+}
+
+.price-change-indicator {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 12px;
+  background: #f9fafb;
+  border-radius: 6px;
+}
+
+.price-change-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.price-change-value.positive {
+  color: #059669;
+}
+
+.price-change-value.negative {
+  color: #dc2626;
+}
+
+.trigger-warning {
+  background: #fef3c7;
+  color: #92400e;
+  padding: 2px 4px;
+  border-radius: 3px;
+  font-size: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* 详情信息 */
+.monitoring-details {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 11px;
+}
+
+.detail-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.detail-label {
+  color: #9ca3af;
+  font-weight: 500;
+}
+
+.detail-value {
+  color: #374151;
+  font-weight: 600;
+}
+
+.detail-value.time {
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 400;
+}
+
+
+
+/* 价格信息显示区域 */
+.price-info-section {
+  background: #f9fafb;
+  border: 1px solid #f3f4f6;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+  transition: all 0.2s ease;
+}
+
+.price-info-section:hover {
+  background: #f3f4f6;
+}
+
+/* 移动端价格监听优化 */
+@media (max-width: 768px) {
+  .ant-drawer .ant-drawer-body {
+    padding: 16px 12px;
+  }
+  
+  .monitoring-card .ant-card-body {
+    padding: 12px;
+  }
+  
+  .price-info-section {
+    padding: 10px;
+    margin-bottom: 10px;
+  }
+}
+
+/* 监听数量徽章样式 */
+.monitor-count-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  background: #ff4d4f;
+  color: white;
+  border-radius: 50%;
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  border: 2px solid white;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+.control-btn.secondary-btn {
+  position: relative;
+  overflow: visible;
+}
+
+/* 监听卡片控制按钮区域 */
+.monitoring-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 监听开关样式 */
+.monitor-toggle-switch {
+  display: flex;
+  align-items: center;
+}
+
+.monitor-toggle-switch .ant-switch {
+  background-color: #d1d5db;
+  min-width: 32px;
+  height: 16px;
+}
+
+.monitor-toggle-switch .ant-switch-checked {
+  background-color: #10b981;
+}
+
+.monitor-toggle-switch .ant-switch::after {
+  width: 12px;
+  height: 12px;
+  top: 2px;
+}
+
+.monitor-toggle-switch .ant-switch-checked::after {
+  margin-left: -14px;
+}
+
+/* 盈亏显示改进 - 支持金额和百分比 */
+.pnl-display {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.pnl-amount {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.pnl-percentage {
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.8;
+  line-height: 1.1;
+}

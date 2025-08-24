@@ -1,0 +1,68 @@
+package redis
+
+import (
+	"encoding/json"
+	"fmt"
+	"trading_assistant/models"
+
+	"github.com/sirupsen/logrus"
+)
+
+// SetPosition 设置持仓信息
+func (c *Client) SetPosition(position *models.Position) error {
+	if position.Size == 0 {
+		key := fmt.Sprintf("%s:%s:%s", KeyPosition, position.Symbol, position.Side)
+		return c.rdb.Del(c.ctx, key).Err()
+	}
+
+	key := fmt.Sprintf("%s:%s:%s", KeyPosition, position.Symbol, position.Side)
+	data, err := json.Marshal(position)
+	if err != nil {
+		return err
+	}
+	return c.rdb.Set(c.ctx, key, data, CacheExpirationPositions).Err()
+}
+
+// GetPosition 获取特定持仓信息
+func (c *Client) GetPosition(symbol, side string) (*models.Position, error) {
+	key := fmt.Sprintf("%s:%s:%s", KeyPosition, symbol, side)
+	data, err := c.rdb.Get(c.ctx, key).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var position models.Position
+	err = json.Unmarshal([]byte(data), &position)
+	return &position, err
+}
+
+// GetAllPositions 获取所有持仓信息
+func (c *Client) GetAllPositions() ([]*models.Position, error) {
+	keys, err := c.rdb.Keys(c.ctx, fmt.Sprintf("%s:*", KeyPosition)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var positions []*models.Position
+	for i := range keys {
+		key := keys[i]
+		data, err := c.rdb.Get(c.ctx, key).Result()
+		if err != nil {
+			logrus.Errorf("获取持仓数据失败 %s: %v", key, err)
+			continue
+		}
+
+		var position models.Position
+		if err := json.Unmarshal([]byte(data), &position); err != nil {
+			logrus.Errorf("解析持仓数据失败 %s: %v", key, err)
+			continue
+		}
+
+		// 只返回持仓大小不为0的记录
+		if position.Size != 0 {
+			positions = append(positions, &position)
+		}
+	}
+
+	return positions, nil
+}

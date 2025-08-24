@@ -1,0 +1,57 @@
+# 编译输出
+trading_assistant
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+.env
+
+# 测试相关
+*.test
+*.out
+
+# Go工作区文件
+go.work
+
+# 依赖目录
+/vendor/
+
+# 环境配置文件
+.env
+.env.local
+.env.production
+
+# 日志文件
+*.log
+
+# IDE文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 备份文件
+*.backup
+*.bak
+

@@ -1,0 +1,37 @@
+/* 隐藏KLineCharts右上角的原生工具栏 */
+
+/* 通用隐藏策略 - 隐藏所有绝对定位在右上角的元素 */
+div[style*="position: absolute"][style*="top"][style*="right"] {
+  display: none !important;
+}
+
+div[style*="position: absolute"][style*="top: 0"][style*="right: 0"] {
+  display: none !important;
+}
+
+div[style*="position: absolute"][style*="top:0"][style*="right:0"] {
+  display: none !important;
+}
+
+/* 隐藏可能的工具栏类名 */
+[class*="toolbar"],
+[class*="widget"],
+[class*="overlay"] {
+  position: relative !important;
+}
+
+[class*="toolbar"] > div[style*="position: absolute"],
+[class*="widget"] > div[style*="position: absolute"],
+[class*="overlay"] > div[style*="position: absolute"] {
+  display: none !important;
+}
+
+/* 特定针对KLineCharts的隐藏 */
+.klinecharts div[style*="position: absolute"][style*="right"] {
+  display: none !important;
+}
+
+/* 隐藏可能的浮动菜单按钮 */
+div[style*="z-index"][style*="position: absolute"][style*="right"] {
+  display: none !important;
+}
