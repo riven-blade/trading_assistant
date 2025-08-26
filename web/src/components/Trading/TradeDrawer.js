@@ -128,8 +128,8 @@ const TradeDrawer = ({
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
             <Text type="secondary">保证金模式:</Text>
-            <Text strong style={{ color: marginMode === 'cross' ? '#1890ff' : '#fa8c16' }}>
-              {marginMode === 'cross' ? '全仓' : '逐仓'}
+            <Text strong style={{ color: marginMode === 'CROSS' ? '#1890ff' : '#fa8c16' }}>
+              {marginMode === 'CROSS' ? '全仓' : '逐仓'}
             </Text>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>

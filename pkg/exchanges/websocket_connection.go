@@ -23,8 +23,9 @@ type WebSocketConnection struct {
 	mutex          sync.RWMutex
 
 	// 处理器函数
-	messageHandler func([]byte) error // 消息处理器
-	errorHandler   func(error)        // 错误处理器
+	messageHandler   func([]byte) error // 消息处理器
+	errorHandler     func(error)        // 错误处理器
+	reconnectHandler func(int, error)   // 重连处理器 (attempt, error)
 
 	// 生命周期管理
 	ctx    context.Context
@@ -91,6 +92,11 @@ func (ws *WebSocketConnection) reconnect() {
 
 	ws.reconnectCount++
 
+	// 通知重连开始
+	if ws.reconnectHandler != nil {
+		ws.reconnectHandler(ws.reconnectCount, fmt.Errorf("WebSocket reconnecting, attempt %d/%d", ws.reconnectCount, ws.maxReconnect))
+	}
+
 	// 指数退避：2^attempt * 1秒，最大30秒
 	backoff := time.Duration(1<<uint(ws.reconnectCount)) * time.Second
 	if backoff > 30*time.Second {
@@ -104,8 +110,16 @@ func (ws *WebSocketConnection) reconnect() {
 			ws.errorHandler(fmt.Errorf("reconnect attempt %d/%d failed: %w",
 				ws.reconnectCount, ws.maxReconnect, err))
 		}
+		// 通知重连失败
+		if ws.reconnectHandler != nil {
+			ws.reconnectHandler(ws.reconnectCount, fmt.Errorf("WebSocket reconnect failed, attempt %d/%d: %w", ws.reconnectCount, ws.maxReconnect, err))
+		}
 		go ws.reconnect() // 继续重连
 	} else {
+		// 通知重连成功
+		if ws.reconnectHandler != nil {
+			ws.reconnectHandler(ws.reconnectCount, nil) // error为nil表示重连成功
+		}
 		ws.reconnectCount = 0 // 重连成功，重置计数
 	}
 }
@@ -156,6 +170,11 @@ func (ws *WebSocketConnection) SetHandler(handler func([]byte) error) {
 // SetErrorHandler 设置错误处理器
 func (ws *WebSocketConnection) SetErrorHandler(handler func(error)) {
 	ws.errorHandler = handler
+}
+
+// SetReconnectHandler 设置重连处理器
+func (ws *WebSocketConnection) SetReconnectHandler(handler func(int, error)) {
+	ws.reconnectHandler = handler
 }
 
 // ========== 便利方法 ==========

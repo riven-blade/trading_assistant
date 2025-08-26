@@ -389,7 +389,7 @@ const TradingPairs = () => {
       const orderTypeText = orderType === 'market' ? '市价' : '限价';
       
       const baseAsset = selectedTradeSymbol.replace('USDT', '');
-      const marginModeText = marginMode === 'cross' ? '全仓' : '逐仓';
+      const marginModeText = marginMode === 'CROSS' ? '全仓' : '逐仓';
       message.success(`${actionText}预估价已创建 | ${orderTypeText}单 ${selectedLeverage}x杠杆 ${marginModeText} ${quantity} ${baseAsset}`);
       setTradeModalVisible(false);
       fetchSymbolEstimates();
@@ -452,7 +452,7 @@ const TradingPairs = () => {
         <Row gutter={[16, 16]}>
           {selectedPairs.map((pair) => (
             <Col 
-              xs={12} 
+              xs={24} 
               sm={12} 
               md={8} 
               lg={6} 

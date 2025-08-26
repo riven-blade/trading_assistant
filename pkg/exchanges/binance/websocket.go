@@ -57,6 +57,9 @@ type WebSocket struct {
 	// 发布函数
 	publishFunc func(types.MetaData, interface{}) error
 
+	// 重连事件处理函数
+	reconnectHandler func(int, error)
+
 	// 用户数据流相关
 	userDataListenKey   string
 	userDataPublishFunc func(types.MetaData, interface{}) error
@@ -220,6 +223,11 @@ func (ws *WebSocket) createConnection() error {
 	wsInst.SetErrorHandler(func(err error) {
 		// 标记连接为不健康
 		atomic.StoreInt32(&conn.isHealthy, 0)
+	})
+
+	// 设置重连处理器
+	wsInst.SetReconnectHandler(func(attempt int, err error) {
+		ws.handleReconnectEvent(attempt, err)
 	})
 
 	ws.connections = append(ws.connections, conn)
@@ -1014,6 +1022,11 @@ func (ws *WebSocket) connectUserDataStream() error {
 		logrus.Errorf("用户数据流连接错误: %v", err)
 	})
 
+	// 设置重连处理器
+	conn.SetReconnectHandler(func(attempt int, err error) {
+		ws.handleReconnectEvent(attempt, err)
+	})
+
 	// 连接已经在NewWebSocketConnection中启动
 
 	ws.userDataConnection = conn
@@ -1096,4 +1109,16 @@ func (ws *WebSocket) getUserDataWebSocketURL() string {
 	}
 
 	return "wss://fstream.binance.com/ws"
+}
+
+// SetReconnectHandler 设置重连事件处理器
+func (ws *WebSocket) SetReconnectHandler(handler func(int, error)) {
+	ws.reconnectHandler = handler
+}
+
+// handleReconnectEvent 处理重连事件
+func (ws *WebSocket) handleReconnectEvent(attempt int, err error) {
+	if ws.reconnectHandler != nil {
+		ws.reconnectHandler(attempt, err)
+	}
 }

@@ -58,26 +58,31 @@ const TradingPairCard = ({
               </Tag>
             )}
             <button
-              className="control-btn primary-btn"
+              className="control-btn primary-btn kline-btn-icon"
               onClick={() => onAction(symbol, 'kline')}
               title="查看K线图"
               style={{
-                padding: '2px 6px',
+                padding: '0',
                 fontSize: '12px',
-                height: '20px',
-                lineHeight: '16px',
-                borderRadius: '4px',
+                height: '24px',
+                width: '24px',
+                minWidth: '24px',
+                minHeight: '24px',
+                maxWidth: '24px',
+                maxHeight: '24px',
+                borderRadius: '50%',
                 background: '#1890ff',
                 border: '1px solid #1890ff',
                 color: 'white',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '2px',
-                minWidth: '45px'
+                justifyContent: 'center',
+                boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                boxSizing: 'border-box',
+                flexShrink: 0
               }}
             >
-              <LineChartOutlined style={{ fontSize: '12px' }} />
-              K线
+              <LineChartOutlined style={{ fontSize: '13px' }} />
             </button>
           </div>
         </div>

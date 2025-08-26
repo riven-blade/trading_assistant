@@ -43,6 +43,11 @@ func (am *AccountManager) Start() {
 	am.running = true
 	logrus.Info("启动账户管理器，开始实时监听...")
 
+	// 设置用户数据流WebSocket重连处理器
+	if am.binanceClient != nil {
+		am.binanceClient.SetWebSocketReconnectHandler(am.handleUserDataReconnect)
+	}
+
 	// 初始化基础数据
 	go am.initializeData()
 
@@ -537,4 +542,34 @@ func (am *AccountManager) GetAccountStatus() map[string]interface{} {
 // GetBinanceClient 获取Binance客户端
 func (am *AccountManager) GetBinanceClient() *binance.Binance {
 	return am.binanceClient
+}
+
+// handleUserDataReconnect 处理用户数据流WebSocket重连事件
+func (am *AccountManager) handleUserDataReconnect(attempt int, err error) {
+	if err == nil {
+		// 重连成功
+		message := fmt.Sprintf("用户数据流重连成功 (尝试次数: %d)", attempt)
+		logrus.Infof("用户数据流WebSocket重连成功，尝试次数: %d", attempt)
+
+		// 重连成功后重新初始化数据
+		go am.initializeData()
+
+		// 发送Telegram通知
+		if telegram.GlobalTelegramClient != nil {
+			if sendErr := telegram.GlobalTelegramClient.SendMessage(message); sendErr != nil {
+				logrus.Errorf("发送用户数据流重连成功通知失败: %v", sendErr)
+			}
+		}
+	} else {
+		// 重连失败或正在重连
+		message := fmt.Sprintf("用户数据流重连 (尝试 %d): %s", attempt, err.Error())
+		logrus.Warnf("用户数据流WebSocket重连事件，尝试次数: %d, 错误: %v", attempt, err)
+
+		// 发送Telegram通知
+		if telegram.GlobalTelegramClient != nil {
+			if sendErr := telegram.GlobalTelegramClient.SendMessage(message); sendErr != nil {
+				logrus.Errorf("发送用户数据流重连通知失败: %v", sendErr)
+			}
+		}
+	}
 }

@@ -28,6 +28,8 @@ tmp/
 *.swo
 *~
 
+deploy/
+
 # 操作系统生成文件
 .DS_Store
 .DS_Store?

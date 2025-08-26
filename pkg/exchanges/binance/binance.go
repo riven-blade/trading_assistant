@@ -1404,6 +1404,13 @@ func (b *Binance) GetWebSocketClient() *WebSocket {
 	return b.wsClient
 }
 
+// SetWebSocketReconnectHandler 设置WebSocket重连处理器
+func (b *Binance) SetWebSocketReconnectHandler(handler func(int, error)) {
+	if b.wsClient != nil {
+		b.wsClient.SetReconnectHandler(handler)
+	}
+}
+
 // ========== 期货交易API ==========
 
 // FuturesNewOrder 期货下单 - 支持双向持仓

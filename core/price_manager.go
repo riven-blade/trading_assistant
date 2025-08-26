@@ -8,6 +8,7 @@ import (
 	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
+	"trading_assistant/pkg/telegram"
 
 	"github.com/sirupsen/logrus"
 )
@@ -55,6 +56,9 @@ func (pm *PriceManager) Start() error {
 
 	pm.isRunning = true
 	logrus.Info("价格管理器已启动")
+
+	// 设置WebSocket重连处理器
+	pm.binanceClient.SetWebSocketReconnectHandler(pm.handleWebSocketReconnect)
 
 	// 启动选中币种的订阅
 	if err := pm.subscribeSelectedCoins(); err != nil {
@@ -353,4 +357,31 @@ func (pm *PriceManager) GetSubscriptionStatus() map[string]*PriceSubscription {
 	}
 
 	return status
+}
+
+// handleWebSocketReconnect 处理WebSocket重连事件
+func (pm *PriceManager) handleWebSocketReconnect(attempt int, err error) {
+	if err == nil {
+		// 重连成功
+		message := fmt.Sprintf("WebSocket重连成功 (尝试次数: %d)", attempt)
+		logrus.Infof("WebSocket重连成功，尝试次数: %d", attempt)
+
+		// 发送Telegram通知
+		if telegram.GlobalTelegramClient != nil {
+			if sendErr := telegram.GlobalTelegramClient.SendMessage(message); sendErr != nil {
+				logrus.Errorf("发送WebSocket重连成功通知失败: %v", sendErr)
+			}
+		}
+	} else {
+		// 重连失败或正在重连
+		message := fmt.Sprintf("WebSocket重连 (尝试 %d): %s", attempt, err.Error())
+		logrus.Warnf("WebSocket重连事件，尝试次数: %d, 错误: %v", attempt, err)
+
+		// 发送Telegram通知
+		if telegram.GlobalTelegramClient != nil {
+			if sendErr := telegram.GlobalTelegramClient.SendMessage(message); sendErr != nil {
+				logrus.Errorf("发送WebSocket重连通知失败: %v", sendErr)
+			}
+		}
+	}
 }
