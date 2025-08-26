@@ -6,6 +6,10 @@ trading_assistant
 *.so
 *.dylib
 
+
+web/node_modules/
+node_modules/
+
 .env
 
 # 测试相关

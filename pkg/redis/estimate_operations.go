@@ -118,6 +118,64 @@ func (c *Client) GetEstimatesBySymbol(symbol string) ([]*models.PriceEstimate, e
 	return estimates, nil
 }
 
+// GetAllEstimates 获取所有状态的价格预估（包括listening, triggered, failed）
+func (c *Client) GetAllEstimates() ([]*models.PriceEstimate, error) {
+	keys, err := c.rdb.Keys(c.ctx, fmt.Sprintf("%s:*", KeyPriceEstimate)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var estimates []*models.PriceEstimate
+	for i := range keys {
+		key := keys[i]
+		data, err := c.rdb.Get(c.ctx, key).Result()
+		if err != nil {
+			logrus.Errorf("获取价格预估数据失败 %s: %v", key, err)
+			continue
+		}
+
+		var estimate models.PriceEstimate
+		if err := json.Unmarshal([]byte(data), &estimate); err != nil {
+			logrus.Errorf("解析价格预估数据失败 %s: %v", key, err)
+			continue
+		}
+
+		estimates = append(estimates, &estimate)
+	}
+
+	return estimates, nil
+}
+
+// GetAllEstimatesBySymbol 根据交易对获取所有状态的价格预估
+func (c *Client) GetAllEstimatesBySymbol(symbol string) ([]*models.PriceEstimate, error) {
+	keys, err := c.rdb.Keys(c.ctx, fmt.Sprintf("%s:*", KeyPriceEstimate)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	var estimates []*models.PriceEstimate
+	for i := range keys {
+		key := keys[i]
+		data, err := c.rdb.Get(c.ctx, key).Result()
+		if err != nil {
+			logrus.Errorf("获取价格预估数据失败 %s: %v", key, err)
+			continue
+		}
+
+		var estimate models.PriceEstimate
+		if err := json.Unmarshal([]byte(data), &estimate); err != nil {
+			logrus.Errorf("解析价格预估数据失败 %s: %v", key, err)
+			continue
+		}
+
+		if estimate.Symbol == symbol {
+			estimates = append(estimates, &estimate)
+		}
+	}
+
+	return estimates, nil
+}
+
 // DeletePriceEstimate 删除价格预估
 func (c *Client) DeletePriceEstimate(id string) error {
 	key := fmt.Sprintf("%s:%s", KeyPriceEstimate, id)

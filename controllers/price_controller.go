@@ -296,7 +296,7 @@ func (p *PriceController) GetPriceEstimates(ctx *gin.Context) {
 		})
 		return
 	}
-	
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"data":  estimates,
 		"total": len(estimates),
@@ -383,6 +383,41 @@ func (p *PriceController) TogglePriceEstimate(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "价格预估状态更新成功",
 		"data":    estimate,
+	})
+}
+
+// GetAllPriceEstimates 获取所有状态的价格预估列表（包括listening, triggered, failed）
+func (p *PriceController) GetAllPriceEstimates(ctx *gin.Context) {
+	symbol := ctx.Query("symbol")
+
+	if redis.GlobalRedisClient == nil {
+		logrus.Error("Redis客户端未初始化")
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "Redis服务不可用",
+		})
+		return
+	}
+
+	var estimates []*models.PriceEstimate
+	var err error
+
+	if symbol != "" {
+		estimates, err = redis.GlobalRedisClient.GetAllEstimatesBySymbol(symbol)
+	} else {
+		estimates, err = redis.GlobalRedisClient.GetAllEstimates()
+	}
+
+	if err != nil {
+		logrus.Errorf("获取所有价格预估失败: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "获取价格预估失败",
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"data":  estimates,
+		"total": len(estimates),
 	})
 }
 

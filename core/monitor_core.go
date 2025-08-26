@@ -41,7 +41,10 @@ func (pm *PriceMonitor) Start() {
 
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
-		telegram.GlobalTelegramClient.SendMessage("price monitor started")
+		err := telegram.GlobalTelegramClient.SendMessage("price monitor started")
+		if err != nil {
+			logrus.Errorf("发送Telegram通知失败: %v", err)
+		}
 	}
 
 	go pm.monitorLoop()
@@ -59,7 +62,10 @@ func (pm *PriceMonitor) Stop() {
 
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
-		telegram.GlobalTelegramClient.SendMessage("app listening stopped")
+		err := telegram.GlobalTelegramClient.SendMessage("app listening stopped")
+		if err != nil {
+			logrus.Errorf("发送Telegram通知失败: %v", err)
+		}
 	}
 }
 

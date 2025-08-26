@@ -66,7 +66,8 @@ func SetupRoutes(r *gin.Engine, binanceClient *binance.Binance, marketManager *c
 		estimates := v1.Group("/estimates")
 		{
 			estimates.POST("", priceController.CreatePriceEstimate)           // 创建价格预估
-			estimates.GET("", priceController.GetPriceEstimates)              // 获取价格预估列表
+			estimates.GET("", priceController.GetPriceEstimates)              // 获取价格预估列表（仅listening状态）
+			estimates.GET("/all", priceController.GetAllPriceEstimates)       // 获取所有状态的价格预估列表
 			estimates.DELETE("/:id", priceController.DeletePriceEstimate)     // 删除价格预估
 			estimates.PUT("/:id/toggle", priceController.TogglePriceEstimate) // 切换价格预估监听状态
 		}
