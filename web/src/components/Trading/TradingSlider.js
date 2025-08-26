@@ -16,7 +16,7 @@ import './TradingSlider.css';
  * @param {string} leftLabel - 左侧标签
  * @param {Function} tooltipFormatter - tooltip格式化函数
  * @param {boolean} disabled - 是否禁用
- * @param {string} action - 操作类型 (take_profit, stop_loss, add_position, 等)
+ * @param {string} action - 操作类型 (take_profit, stop_loss, addition, 等)
  */
 const TradingSlider = ({
   title,
@@ -43,7 +43,7 @@ const TradingSlider = ({
     // 只有价格滑块才需要根据action显示不同标签
     if (action === 'take_profit') return '止盈价:';
     if (action === 'stop_loss') return '止损价:';
-    if (action === 'add_position') return '加仓价:';
+    if (action === 'addition') return '加仓价:';
     return '开仓价:'; // 默认开仓
   };
   return (

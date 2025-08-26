@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"trading_assistant/pkg/exchanges/types"
 
 	"trading_assistant/pkg/exchanges"
 
@@ -99,7 +100,7 @@ func (b *Binance) setCapabilities() {
 	}
 
 	// 根据市场类型调整功能
-	if b.marketType != exchanges.MarketTypeFuture {
+	if b.marketType != types.MarketTypeFuture {
 		capabilities["fetchPositions"] = false
 		capabilities["setLeverage"] = false
 		capabilities["setMarginMode"] = false
@@ -154,7 +155,7 @@ func (b *Binance) setEndpoints() {
 	b.endpoints["openOrders"] = baseURL + "/api/v3/openOrders"
 
 	// 期货端点
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		b.endpoints["futuresExchangeInfo"] = futuresURL + "/fapi/v1/exchangeInfo"
 		b.endpoints["futuresTicker24hr"] = futuresURL + "/fapi/v1/ticker/24hr"
 		b.endpoints["futuresKlines"] = futuresURL + "/fapi/v1/klines"
@@ -494,9 +495,9 @@ func (b *Binance) delete(endpoint string, params map[string]interface{}, signed 
 // ========== 市场数据API ==========
 
 // FetchMarkets 获取市场信息
-func (b *Binance) FetchMarkets(ctx context.Context, params map[string]interface{}) ([]*exchanges.Market, error) {
+func (b *Binance) FetchMarkets(ctx context.Context, params map[string]interface{}) ([]*types.Market, error) {
 	var endpoint string
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		endpoint = b.endpoints["futuresExchangeInfo"]
 	} else {
 		endpoint = b.endpoints["exchangeInfo"]
@@ -517,7 +518,7 @@ func (b *Binance) FetchMarkets(ctx context.Context, params map[string]interface{
 		return nil, fmt.Errorf("invalid response format")
 	}
 
-	var markets []*exchanges.Market
+	var markets []*types.Market
 	for _, symbolData := range symbols {
 		symbolMap, ok := symbolData.(map[string]interface{})
 		if !ok {
@@ -534,7 +535,7 @@ func (b *Binance) FetchMarkets(ctx context.Context, params map[string]interface{
 }
 
 // parseMarket 解析市场信息
-func (b *Binance) parseMarket(data map[string]interface{}) *exchanges.Market {
+func (b *Binance) parseMarket(data map[string]interface{}) *types.Market {
 	symbol := b.SafeString(data, "symbol", "")
 	if symbol == "" {
 		return nil
@@ -548,16 +549,16 @@ func (b *Binance) parseMarket(data map[string]interface{}) *exchanges.Market {
 	baseAsset := b.SafeString(data, "baseAsset", "")
 	quoteAsset := b.SafeString(data, "quoteAsset", "")
 
-	market := &exchanges.Market{
+	market := &types.Market{
 		ID:     symbol,
 		Symbol: fmt.Sprintf("%s/%s", baseAsset, quoteAsset),
 		Base:   baseAsset,
 		Quote:  quoteAsset,
 		Type:   b.marketType,
 		Active: status == "TRADING",
-		Spot:   b.marketType == exchanges.MarketTypeSpot,
-		Future: b.marketType == exchanges.MarketTypeFuture,
-		Swap:   b.marketType == exchanges.MarketTypeFuture,
+		Spot:   b.marketType == types.MarketTypeSpot,
+		Future: b.marketType == types.MarketTypeFuture,
+		Swap:   b.marketType == types.MarketTypeFuture,
 		Info:   data,
 	}
 
@@ -571,8 +572,8 @@ func (b *Binance) parseMarket(data map[string]interface{}) *exchanges.Market {
 }
 
 // parseMarketPrecision 解析市场精度
-func (b *Binance) parseMarketPrecision(filters []interface{}) exchanges.MarketPrecision {
-	precision := exchanges.MarketPrecision{}
+func (b *Binance) parseMarketPrecision(filters []interface{}) types.MarketPrecision {
+	precision := types.MarketPrecision{}
 
 	for _, filterData := range filters {
 		filter, ok := filterData.(map[string]interface{})
@@ -595,8 +596,8 @@ func (b *Binance) parseMarketPrecision(filters []interface{}) exchanges.MarketPr
 }
 
 // parseMarketLimits 解析市场限制
-func (b *Binance) parseMarketLimits(filters []interface{}) exchanges.MarketLimits {
-	limits := exchanges.MarketLimits{}
+func (b *Binance) parseMarketLimits(filters []interface{}) types.MarketLimits {
+	limits := types.MarketLimits{}
 
 	for _, filterData := range filters {
 		filter, ok := filterData.(map[string]interface{})
@@ -623,10 +624,10 @@ func (b *Binance) parseMarketLimits(filters []interface{}) exchanges.MarketLimit
 }
 
 // FetchTickers 批量获取24小时价格统计
-func (b *Binance) FetchTickers(ctx context.Context, symbols []string, params map[string]interface{}) (map[string]*exchanges.Ticker, error) {
+func (b *Binance) FetchTickers(ctx context.Context, symbols []string, params map[string]interface{}) (map[string]*types.Ticker, error) {
 	// 如果没有symbols，获取所有ticker
 	var endpoint string
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		endpoint = b.endpoints["futuresTicker24hr"]
 	} else {
 		endpoint = b.endpoints["ticker24hr"]
@@ -645,7 +646,7 @@ func (b *Binance) FetchTickers(ctx context.Context, symbols []string, params map
 	}
 
 	// 转换为map，便于查找
-	tickers := make(map[string]*exchanges.Ticker)
+	tickers := make(map[string]*types.Ticker)
 	symbolsMap := make(map[string]bool)
 
 	// 如果指定了symbols，创建查找map
@@ -680,7 +681,7 @@ func (b *Binance) FetchTickers(ctx context.Context, symbols []string, params map
 }
 
 // FetchTickersBatch 分批获取ticker数据 - 避免超时
-func (b *Binance) FetchTickersBatch(ctx context.Context, symbols []string, batchSize int) (map[string]*exchanges.Ticker, error) {
+func (b *Binance) FetchTickersBatch(ctx context.Context, symbols []string, batchSize int) (map[string]*types.Ticker, error) {
 	if batchSize <= 0 {
 		batchSize = 100 // 默认批次大小
 	}
@@ -690,7 +691,7 @@ func (b *Binance) FetchTickersBatch(ctx context.Context, symbols []string, batch
 		return b.FetchTickers(ctx, symbols, nil)
 	}
 
-	allTickers := make(map[string]*exchanges.Ticker)
+	allTickers := make(map[string]*types.Ticker)
 
 	// 分批处理
 	for i := 0; i < len(symbols); i += batchSize {
@@ -722,10 +723,10 @@ func (b *Binance) FetchTickersBatch(ctx context.Context, symbols []string, batch
 }
 
 // parseTicker 解析ticker数据
-func (b *Binance) parseTicker(data map[string]interface{}, symbol string) *exchanges.Ticker {
+func (b *Binance) parseTicker(data map[string]interface{}, symbol string) *types.Ticker {
 	timestamp := b.SafeInteger(data, "closeTime", time.Now().UnixMilli())
 
-	return &exchanges.Ticker{
+	return &types.Ticker{
 		Symbol:      symbol,
 		TimeStamp:   timestamp,
 		Datetime:    b.ISO8601(timestamp),
@@ -747,7 +748,7 @@ func (b *Binance) parseTicker(data map[string]interface{}, symbol string) *excha
 }
 
 // FetchKlines 获取K线数据
-func (b *Binance) FetchKlines(ctx context.Context, symbol, interval string, since int64, limit int, params map[string]interface{}) ([]*exchanges.Kline, error) {
+func (b *Binance) FetchKlines(ctx context.Context, symbol, interval string, since int64, limit int, params map[string]interface{}) ([]*types.Kline, error) {
 	if symbol == "" {
 		return nil, fmt.Errorf("symbol不能为空")
 	}
@@ -779,7 +780,7 @@ func (b *Binance) FetchKlines(ctx context.Context, symbol, interval string, sinc
 
 	// 选择正确的端点
 	var endpoint string
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		endpoint = b.endpoints["futuresKlines"]
 	} else {
 		endpoint = b.endpoints["klines"]
@@ -808,7 +809,7 @@ func (b *Binance) FetchKlines(ctx context.Context, symbol, interval string, sinc
 	}
 
 	// 转换为标准格式
-	klines := make([]*exchanges.Kline, 0, len(rawKlines))
+	klines := make([]*types.Kline, 0, len(rawKlines))
 	for i := range rawKlines {
 		rawKline := rawKlines[i]
 		kline := b.parseKline(rawKline, symbol, interval)
@@ -821,7 +822,7 @@ func (b *Binance) FetchKlines(ctx context.Context, symbol, interval string, sinc
 }
 
 // parseKline 解析K线数据
-func (b *Binance) parseKline(data []interface{}, symbol, interval string) *exchanges.Kline {
+func (b *Binance) parseKline(data []interface{}, symbol, interval string) *types.Kline {
 	if len(data) < 11 {
 		return nil
 	}
@@ -878,7 +879,7 @@ func (b *Binance) parseKline(data []interface{}, symbol, interval string) *excha
 	timestamp := toInt64(data[0])
 	closeTime := toInt64(data[6])
 
-	return &exchanges.Kline{
+	return &types.Kline{
 		Symbol:    symbol,
 		Timeframe: interval,
 		Timestamp: timestamp,
@@ -892,7 +893,7 @@ func (b *Binance) parseKline(data []interface{}, symbol, interval string) *excha
 }
 
 // FetchOrders 获取订单信息
-func (b *Binance) FetchOrders(ctx context.Context, symbol string, since int64, limit int, params map[string]interface{}) ([]*exchanges.Order, error) {
+func (b *Binance) FetchOrders(ctx context.Context, symbol string, since int64, limit int, params map[string]interface{}) ([]*types.Order, error) {
 	// 构建请求参数
 	requestParams := map[string]interface{}{}
 
@@ -924,7 +925,7 @@ func (b *Binance) FetchOrders(ctx context.Context, symbol string, since int64, l
 
 	// 选择正确的端点
 	var endpoint string
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		endpoint = "/fapi/v1/allOrders"
 	} else {
 		endpoint = "/api/v3/allOrders"
@@ -949,7 +950,7 @@ func (b *Binance) FetchOrders(ctx context.Context, symbol string, since int64, l
 	}
 
 	// 转换为标准格式
-	orders := make([]*exchanges.Order, 0, len(rawOrders))
+	orders := make([]*types.Order, 0, len(rawOrders))
 	for _, rawOrder := range rawOrders {
 		order := b.parseOrder(rawOrder)
 		if order != nil {
@@ -985,7 +986,7 @@ func (b *Binance) CancelOrder(ctx context.Context, symbol string, orderID string
 
 	// 选择正确的端点
 	var endpoint string
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		endpoint = "/fapi/v1/order"
 	} else {
 		endpoint = "/api/v3/order"
@@ -1009,7 +1010,7 @@ func (b *Binance) CancelOrder(ctx context.Context, symbol string, orderID string
 }
 
 // parseOrder 解析订单数据
-func (b *Binance) parseOrder(data map[string]interface{}) *exchanges.Order {
+func (b *Binance) parseOrder(data map[string]interface{}) *types.Order {
 	orderID := b.SafeString(data, "orderId", "")
 	if orderID == "" {
 		return nil
@@ -1021,7 +1022,7 @@ func (b *Binance) parseOrder(data map[string]interface{}) *exchanges.Order {
 
 	// 期货和现货的字段可能不同
 	var executedQty, cummulativeQuoteQty float64
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		executedQty = b.SafeFloat(data, "executedQty", 0)
 		cummulativeQuoteQty = b.SafeFloat(data, "cumQuote", 0)
 	} else {
@@ -1029,7 +1030,7 @@ func (b *Binance) parseOrder(data map[string]interface{}) *exchanges.Order {
 		cummulativeQuoteQty = b.SafeFloat(data, "cummulativeQuoteQty", 0)
 	}
 
-	return &exchanges.Order{
+	return &types.Order{
 		ID:                 orderID,
 		ClientOrderId:      b.SafeString(data, "clientOrderId", ""),
 		Timestamp:          timestamp,
@@ -1039,6 +1040,7 @@ func (b *Binance) parseOrder(data map[string]interface{}) *exchanges.Order {
 		Type:               strings.ToLower(b.SafeString(data, "type", "")),
 		TimeInForce:        b.SafeString(data, "timeInForce", ""),
 		Side:               strings.ToLower(b.SafeString(data, "side", "")),
+		PositionSide:       b.SafeString(data, "positionSide", ""),
 		Amount:             b.SafeFloat(data, "origQty", 0),
 		Price:              b.SafeFloat(data, "price", 0),
 		Average:            0, // 需要根据已成交金额和数量计算
@@ -1046,11 +1048,11 @@ func (b *Binance) parseOrder(data map[string]interface{}) *exchanges.Order {
 		Remaining:          b.SafeFloat(data, "origQty", 0) - executedQty,
 		Cost:               cummulativeQuoteQty,
 		Status:             strings.ToLower(b.SafeString(data, "status", "")),
-		Fee: exchanges.Fee{
+		Fee: types.Fee{
 			Currency: "", // Binance返回的订单信息中没有手续费信息
 			Cost:     0,
 		},
-		Trades: []exchanges.Trade{}, // 单独获取交易记录
+		Trades: []types.Trade{}, // 单独获取交易记录
 		Info:   data,
 	}
 }
@@ -1058,9 +1060,9 @@ func (b *Binance) parseOrder(data map[string]interface{}) *exchanges.Order {
 // ========== 账户数据API ==========
 
 // FetchBalance 获取账户余额信息
-func (b *Binance) FetchBalance(ctx context.Context, params map[string]interface{}) (*exchanges.Account, error) {
+func (b *Binance) FetchBalance(ctx context.Context, params map[string]interface{}) (*types.Account, error) {
 	var endpoint string
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		endpoint = "/fapi/v2/account"
 	} else {
 		endpoint = "/api/v3/account"
@@ -1088,19 +1090,19 @@ func (b *Binance) FetchBalance(ctx context.Context, params map[string]interface{
 }
 
 // parseBalance 解析余额数据
-func (b *Binance) parseBalance(data map[string]interface{}) *exchanges.Account {
-	account := &exchanges.Account{
+func (b *Binance) parseBalance(data map[string]interface{}) *types.Account {
+	account := &types.Account{
 		Free:      make(map[string]float64),
 		Used:      make(map[string]float64),
 		Total:     make(map[string]float64),
-		Balances:  make(map[string]exchanges.Balance),
+		Balances:  make(map[string]types.Balance),
 		Info:      data,
 		Timestamp: time.Now().UnixMilli(),
 	}
 
 	// 解析余额数组
 	var balancesKey string
-	if b.marketType == exchanges.MarketTypeFuture {
+	if b.marketType == types.MarketTypeFuture {
 		balancesKey = "assets"
 	} else {
 		balancesKey = "balances"
@@ -1115,7 +1117,7 @@ func (b *Binance) parseBalance(data map[string]interface{}) *exchanges.Account {
 				}
 
 				var free, locked float64
-				if b.marketType == exchanges.MarketTypeFuture {
+				if b.marketType == types.MarketTypeFuture {
 					free = b.SafeFloat(balanceMap, "walletBalance", 0)
 					locked = b.SafeFloat(balanceMap, "marginBalance", 0) - free
 				} else {
@@ -1130,7 +1132,7 @@ func (b *Binance) parseBalance(data map[string]interface{}) *exchanges.Account {
 					account.Free[asset] = free
 					account.Used[asset] = locked
 					account.Total[asset] = total
-					account.Balances[asset] = exchanges.Balance{
+					account.Balances[asset] = types.Balance{
 						Free:  free,
 						Used:  locked,
 						Total: total,
@@ -1144,8 +1146,8 @@ func (b *Binance) parseBalance(data map[string]interface{}) *exchanges.Account {
 }
 
 // FetchPositions 获取持仓信息
-func (b *Binance) FetchPositions(ctx context.Context, symbols []string, params map[string]interface{}) ([]*exchanges.Position, error) {
-	if b.marketType != exchanges.MarketTypeFuture {
+func (b *Binance) FetchPositions(ctx context.Context, symbols []string, params map[string]interface{}) ([]*types.Position, error) {
+	if b.marketType != types.MarketTypeFuture {
 		return nil, fmt.Errorf("仓位信息仅在期货模式下可用")
 	}
 
@@ -1181,7 +1183,7 @@ func (b *Binance) FetchPositions(ctx context.Context, symbols []string, params m
 	}
 
 	// 转换为标准格式
-	positions := make([]*exchanges.Position, 0)
+	positions := make([]*types.Position, 0)
 	for i := range positionsResp {
 		positionData := positionsResp[i]
 		position := b.parsePosition(positionData)
@@ -1194,7 +1196,7 @@ func (b *Binance) FetchPositions(ctx context.Context, symbols []string, params m
 }
 
 // parsePosition 解析持仓数据
-func (b *Binance) parsePosition(data map[string]interface{}) *exchanges.Position {
+func (b *Binance) parsePosition(data map[string]interface{}) *types.Position {
 	symbol := b.SafeString(data, "symbol", "")
 	if symbol == "" {
 		return nil
@@ -1213,10 +1215,10 @@ func (b *Binance) parsePosition(data map[string]interface{}) *exchanges.Position
 	if positionSide == "BOTH" {
 		// 单向持仓模式：通过数量正负判断方向
 		if positionAmt > 0 {
-			side = "long"
+			side = types.PositionSideLong
 			size = positionAmt
 		} else {
-			side = "short"
+			side = types.PositionSideShort
 			size = -positionAmt // 转为正数
 		}
 	} else {
@@ -1239,7 +1241,7 @@ func (b *Binance) parsePosition(data map[string]interface{}) *exchanges.Position
 		notional = size * markPrice
 	}
 
-	return &exchanges.Position{
+	return &types.Position{
 		Symbol:            symbol,
 		Size:              size,
 		Side:              side,
@@ -1329,7 +1331,7 @@ func (b *Binance) StopWebSocket() {
 }
 
 // SubscribeToOrderbook 订阅订单簿
-func (b *Binance) SubscribeToOrderbook(symbol string, publishFunc func(exchanges.MetaData, interface{}) error) error {
+func (b *Binance) SubscribeToOrderbook(symbol string, publishFunc func(types.MetaData, interface{}) error) error {
 	if b.wsClient == nil {
 		return fmt.Errorf("websocket not initialized")
 	}
@@ -1350,7 +1352,7 @@ func (b *Binance) UnsubscribeFromOrderbook(symbol string) error {
 }
 
 // SubscribeToMarkPrice 订阅标记价格
-func (b *Binance) SubscribeToMarkPrice(symbol string, publishFunc func(exchanges.MetaData, interface{}) error) error {
+func (b *Binance) SubscribeToMarkPrice(symbol string, publishFunc func(types.MetaData, interface{}) error) error {
 	if b.wsClient == nil {
 		return fmt.Errorf("websocket not initialized")
 	}
@@ -1373,7 +1375,7 @@ func (b *Binance) UnsubscribeFromMarkPrice(symbol string) error {
 // ========== 用户数据流订阅方法 ==========
 
 // SubscribeToUserData 订阅用户数据流
-func (b *Binance) SubscribeToUserData(publishFunc func(exchanges.MetaData, interface{}) error) error {
+func (b *Binance) SubscribeToUserData(publishFunc func(types.MetaData, interface{}) error) error {
 	if b.wsClient == nil {
 		return fmt.Errorf("websocket not initialized")
 	}

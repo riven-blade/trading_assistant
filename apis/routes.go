@@ -86,7 +86,6 @@ func SetupRoutes(r *gin.Engine, binanceClient *binance.Binance, marketManager *c
 			monitor.GET("/orders", monitorController.GetOrders)               // 获取订单信息
 			monitor.POST("/orders/cancel", monitorController.CancelOrder)     // 取消订单
 			monitor.GET("/orderbook/:symbol", monitorController.GetOrderbook) // 获取订单薄
-			monitor.GET("/websocket", monitorController.GetWebSocketStatus)   // 获取WebSocket连接状态
 
 		}
 

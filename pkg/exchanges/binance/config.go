@@ -2,8 +2,7 @@ package binance
 
 import (
 	"fmt"
-
-	"trading_assistant/pkg/exchanges"
+	"trading_assistant/pkg/exchanges/types"
 )
 
 // ========== Binance 配置 ==========
@@ -48,7 +47,7 @@ func DefaultConfig() *Config {
 		UserAgent:       "trading_assistant/1.0",
 		Headers:         make(map[string]string),
 		Options:         make(map[string]interface{}),
-		MarketType:      exchanges.MarketTypeSpot,
+		MarketType:      types.MarketTypeSpot,
 		EnableWebSocket: true,
 		WSMaxReconnect:  3,
 	}
@@ -70,10 +69,10 @@ func (c *Config) Validate() error {
 
 	// 验证市场类型
 	validTypes := map[string]bool{
-		exchanges.MarketTypeSpot:   true,
-		exchanges.MarketTypeMargin: true,
-		exchanges.MarketTypeFuture: true,
-		exchanges.MarketTypeOption: true,
+		types.MarketTypeSpot:   true,
+		types.MarketTypeMargin: true,
+		types.MarketTypeFuture: true,
+		types.MarketTypeOption: true,
 	}
 
 	if !validTypes[c.MarketType] {
@@ -178,7 +177,7 @@ func (c *Config) GetBaseURL() string {
 func (c *Config) GetWebSocketURL() string {
 	// 测试网环境
 	if c.TestNet {
-		if c.MarketType == exchanges.MarketTypeFuture {
+		if c.MarketType == types.MarketTypeFuture {
 			return TestNetFuturesWebSocketURL
 		}
 		return TestNetWebSocketURL
@@ -186,7 +185,7 @@ func (c *Config) GetWebSocketURL() string {
 
 	// 沙盒环境
 	if c.Sandbox {
-		if c.MarketType == exchanges.MarketTypeFuture {
+		if c.MarketType == types.MarketTypeFuture {
 			return TestNetFuturesWebSocketURL
 		}
 		return TestNetWebSocketURL
@@ -194,9 +193,9 @@ func (c *Config) GetWebSocketURL() string {
 
 	// 生产环境 - 根据市场类型选择URL
 	switch c.MarketType {
-	case exchanges.MarketTypeFuture:
+	case types.MarketTypeFuture:
 		return FuturesWebSocketURL
-	case exchanges.MarketTypeOption:
+	case types.MarketTypeOption:
 		return OptionsWebSocketURL
 	default: // spot或未指定
 		return SpotWebSocketURL

@@ -32,8 +32,9 @@ func (c *CoinController) SelectCoin(ctx *gin.Context) {
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
+		logrus.Warnf("币种选择参数错误: %v", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "参数错误: " + err.Error(),
+			"error": "请求参数格式错误",
 		})
 		return
 	}

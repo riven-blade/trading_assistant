@@ -1,61 +1,60 @@
-# 编译输出
-trading_assistant
+# 二进制文件
+/bin/
+/trading_assistant
 *.exe
-*.exe~
 *.dll
 *.so
 *.dylib
 
-
-web/node_modules/
-node_modules/
-
-.env
-
-# 测试相关
-*.test
-*.out
-
-# Go工作区文件
-go.work
-
-# 依赖目录
-/vendor/
-
-# 环境配置文件
+# 环境变量文件
 .env
 .env.local
 .env.production
 
 # 日志文件
 *.log
+logs/
 
-# IDE文件
+# 临时文件
+*.tmp
+*.temp
+temp/
+tmp/
+
+# IDE 配置文件
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# macOS
+# 操作系统生成文件
 .DS_Store
-
-# Windows
-Thumbs.db
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 ehthumbs.db
-Desktop.ini
+Thumbs.db
 
-# 临时文件
-tmp/
-temp/
-*.tmp
+# Go 相关
+*.test
+*.prof
+coverage.out
 
-# 数据库文件
-*.db
-*.sqlite
-*.sqlite3
+# Node.js (前端构建)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# 前端构建产物（如果不需要提交）
+# web/build/
+# web/dist/
+
+# Redis dump文件
+dump.rdb
 
 # 备份文件
-*.backup
 *.bak
-
+*.backup

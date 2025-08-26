@@ -4,6 +4,7 @@ import (
 	"time"
 	"trading_assistant/models"
 	"trading_assistant/pkg/exchanges/binance"
+	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
 
@@ -39,14 +40,6 @@ func (pm *PriceMonitor) Start() {
 	pm.running = true
 	logrus.Info("price monitor started")
 
-	// 发送Telegram通知
-	if telegram.GlobalTelegramClient != nil {
-		err := telegram.GlobalTelegramClient.SendMessage("price monitor started")
-		if err != nil {
-			logrus.Errorf("发送Telegram通知失败: %v", err)
-		}
-	}
-
 	go pm.monitorLoop()
 }
 
@@ -62,7 +55,7 @@ func (pm *PriceMonitor) Stop() {
 
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
-		err := telegram.GlobalTelegramClient.SendMessage("app listening stopped")
+		err := telegram.GlobalTelegramClient.SendMessage("监控停止")
 		if err != nil {
 			logrus.Errorf("发送Telegram通知失败: %v", err)
 		}
@@ -134,23 +127,22 @@ func (pm *PriceMonitor) checkSingleEstimate(estimate *models.PriceEstimate) {
 	// 根据操作类型和交易方向判断触发条件
 	actionType := estimate.ActionType
 	triggerType := estimate.TriggerType
-	createdBy := estimate.CreatedBy
 
 	// 统一使用markPrice
 	var shouldTrigger bool
 	switch estimate.Side {
-	case "long":
-		shouldTrigger = shouldTriggerLong(actionType, triggerType, createdBy, currentPrice, estimate.TargetPrice)
-	case "short":
-		shouldTrigger = shouldTriggerShort(actionType, triggerType, createdBy, currentPrice, estimate.TargetPrice)
+	case types.PositionSideLong:
+		shouldTrigger = shouldTriggerLong(actionType, triggerType, currentPrice, estimate.TargetPrice)
+	case types.PositionSideShort:
+		shouldTrigger = shouldTriggerShort(actionType, triggerType, currentPrice, estimate.TargetPrice)
 	default:
 		logrus.Errorf("无效的交易方向: %s", estimate.Side)
 		return
 	}
 
 	if shouldTrigger {
-		logrus.Infof("价格目标触发: %s %s %s(%s), 当前标记价格: %f, 目标价格: %f",
-			estimate.Symbol, estimate.Side, actionType, createdBy, currentPrice, estimate.TargetPrice)
+		logrus.Infof("价格目标触发: %s %s %s, 当前标记价格: %f, 目标价格: %f",
+			estimate.Symbol, estimate.Side, actionType, currentPrice, estimate.TargetPrice)
 
 		pm.triggerEstimate(estimate, currentPrice)
 	}
@@ -158,15 +150,6 @@ func (pm *PriceMonitor) checkSingleEstimate(estimate *models.PriceEstimate) {
 
 // triggerEstimate 触发价格预估
 func (pm *PriceMonitor) triggerEstimate(estimate *models.PriceEstimate, currentPrice float64) {
-	// 发送价格警报
-	if telegram.GlobalTelegramClient != nil {
-		err := telegram.GlobalTelegramClient.SendPriceAlert(
-			estimate.Symbol, currentPrice, estimate.TargetPrice, estimate.Side)
-		if err != nil {
-			logrus.Errorf("发送价格警报失败: %v", err)
-		}
-	}
-
 	// 执行自动下单
 	err := pm.orderExecutor.ExecuteOrder(estimate, currentPrice)
 	if err != nil {

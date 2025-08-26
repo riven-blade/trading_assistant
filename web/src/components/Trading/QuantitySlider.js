@@ -7,7 +7,6 @@ import TradingSlider from './TradingSlider';
  * @param {number} quantity - 当前数量
  * @param {number} maxQuantity - 最大数量
  * @param {Function} onQuantityChange - 数量变化回调
- * @param {Object} precision - 精度信息
  * @param {string} symbol - 交易对符号
  * @param {Object} config - 操作配置
  */
@@ -16,7 +15,6 @@ const QuantitySlider = ({
   quantity, 
   maxQuantity, 
   onQuantityChange, 
-  precision, 
   symbol,
   config 
 }) => {
@@ -66,14 +64,14 @@ const QuantitySlider = ({
       <TradingSlider
         title={config.quantityLabel || `${baseAsset}数量`}
         value={quantity}
-        min={precision ? parseFloat(precision.min_qty) : 0.001}
+        min={0.001}
         max={maxQuantity}
-        step={precision ? parseFloat(precision.step_size) : 0.001}
+        step={0.001}
         onChange={onQuantityChange}
         marks={optimizedMarks}
         displayLabel="当前数量:"
-        displayValue={`${quantity.toFixed(precision?.quantity_precision || 4)} ${baseAsset}`}
-        tooltipFormatter={(value) => `${value?.toFixed(precision?.quantity_precision || 6)} ${baseAsset}`}
+        displayValue={`${quantity.toFixed(6)} ${baseAsset}`}
+        tooltipFormatter={(value) => `${value?.toFixed(6)} ${baseAsset}`}
         action={action}
       />
     );

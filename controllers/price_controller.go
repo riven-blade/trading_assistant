@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"time"
 	"trading_assistant/models"
+	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 
 	"github.com/gin-gonic/gin"
@@ -23,55 +24,61 @@ type PriceEstimateRequest struct {
 	ActionType  string  `json:"action_type" binding:"required"` // open, close
 	TargetPrice float64 `json:"target_price" binding:"required"`
 	Quantity    float64 `json:"quantity" binding:"required"`
-	Leverage    int     `json:"leverage"`    // 杠杆倍数
-	OrderType   string  `json:"order_type"`  // 订单类型：market, limit
-	MarginMode  string  `json:"margin_mode"` // CROSS, ISOLATED (默认ISOLATED)
-	CreatedBy   string  `json:"created_by"`
+	Leverage    int     `json:"leverage"`     // 杠杆倍数
+	OrderType   string  `json:"order_type"`   // 订单类型：market, limit
+	MarginMode  string  `json:"margin_mode"`  // CROSS, ISOLATED (默认CROSS)
 	TriggerType string  `json:"trigger_type"` // 触发类型
 }
 
 // validatePriceEstimateRequest 验证价格预估请求
 func (p *PriceController) validatePriceEstimateRequest(req *PriceEstimateRequest) error {
 	// 验证交易方向
-	if req.Side != "long" && req.Side != "short" {
-		return fmt.Errorf("交易方向必须是 long 或 short")
+	if req.Side != types.PositionSideLong && req.Side != types.PositionSideShort {
+		return fmt.Errorf("交易方向必须是 %s 或 %s", types.PositionSideLong, types.PositionSideShort)
 	}
 
 	// 验证操作类型
-	validActionTypes := []string{"open", "add", "take_profit", "stop_loss", "close"}
+	validActionTypes := []string{
+		models.ActionTypeOpen,
+		models.ActionTypeAddition,
+		models.ActionTypeClose,
+		models.ActionTypeTakeProfit,
+		models.ActionTypeStopLoss,
+	}
 	isValidActionType := false
-	for _, validType := range validActionTypes {
+	for i := range validActionTypes {
+		validType := validActionTypes[i]
 		if req.ActionType == validType {
 			isValidActionType = true
 			break
 		}
 	}
 	if !isValidActionType {
-		return fmt.Errorf("操作类型必须是 open, add, take_profit, stop_loss 或 close")
+		return fmt.Errorf("操作类型必须是: %v", validActionTypes)
 	}
 
 	// 设置默认值并验证保证金模式
 	if req.MarginMode == "" {
-		req.MarginMode = "ISOLATED" // 默认逐仓
+		req.MarginMode = types.MarginModeCross // 默认全仓
 	}
-	if req.MarginMode != "CROSS" && req.MarginMode != "ISOLATED" {
-		return fmt.Errorf("保证金模式必须是 CROSS 或 ISOLATED")
+	if req.MarginMode != types.MarginModeCross && req.MarginMode != types.MarginModeIsolated {
+		return fmt.Errorf("保证金模式必须是 %s 或 %s", types.MarginModeCross, types.MarginModeIsolated)
 	}
 
 	// 设置默认值并验证订单类型
 	if req.OrderType == "" {
-		req.OrderType = "limit" // 默认限价单
+		req.OrderType = types.OrderTypeLimit // 默认限价单
 	}
-	if req.OrderType != "market" && req.OrderType != "limit" {
-		return fmt.Errorf("订单类型必须是 market 或 limit")
+	if req.OrderType != types.OrderTypeMarket && req.OrderType != types.OrderTypeLimit {
+		return fmt.Errorf("订单类型必须是 %s 或 %s", types.OrderTypeMarket, types.OrderTypeLimit)
 	}
 
 	// 设置默认值并验证触发类型
 	if req.TriggerType == "" {
-		req.TriggerType = "condition" // 默认条件触发
+		req.TriggerType = models.TriggerTypeCondition // 默认条件触发
 	}
-	if req.TriggerType != "condition" && req.TriggerType != "time" {
-		return fmt.Errorf("触发类型必须是 condition 或 time")
+	if req.TriggerType != models.TriggerTypeCondition && req.TriggerType != models.TriggerTypeImmediate {
+		return fmt.Errorf("触发类型必须是 %s 或 %s", models.TriggerTypeCondition, models.TriggerTypeImmediate)
 	}
 
 	// 设置默认杠杆
@@ -144,7 +151,7 @@ func (p *PriceController) formatPriceEstimatePrecision(req *PriceEstimateRequest
 		}
 	}
 
-	// 格式化价格精度（使用从TickSize计算的精度）
+	// 格式化价格精度
 	pricePrecision := coin.GetPricePrecisionFromTickSize()
 	if pricePrecision > 0 {
 		priceFormat := fmt.Sprintf("%%.%df", pricePrecision)
@@ -206,7 +213,6 @@ func (p *PriceController) createPriceEstimateModel(req *PriceEstimateRequest) *m
 		TriggerType: req.TriggerType,
 		Status:      models.EstimateStatusListening, // 初始状态为监听状态
 		Enabled:     false,                          // 默认未启用，需要用户手动启用
-		CreatedBy:   req.CreatedBy,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}
@@ -217,8 +223,9 @@ func (p *PriceController) CreatePriceEstimate(ctx *gin.Context) {
 	var req PriceEstimateRequest
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
+		logrus.Warnf("价格预估参数错误: %v", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "参数错误: " + err.Error(),
+			"error": "请求参数格式错误",
 		})
 		return
 	}
@@ -340,8 +347,9 @@ func (p *PriceController) TogglePriceEstimate(ctx *gin.Context) {
 	}
 
 	if err := ctx.ShouldBindJSON(&req); err != nil {
+		logrus.Warnf("价格预估切换参数错误: %v", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "参数错误: " + err.Error(),
+			"error": "请求参数格式错误",
 		})
 		return
 	}

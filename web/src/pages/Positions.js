@@ -9,7 +9,7 @@ import {
   Empty
 } from 'antd';
 import api, { toggleEstimateEnabled } from '../services/api';
-import { autoFixPriceAndQuantity, validatePriceComplete, validateQuantityComplete, calculateUsdtAmount, calculatePnl } from '../utils/precision';
+import { calculateUsdtAmount, calculatePnl } from '../utils/precision';
 
 // 通用组件和Hooks
 import PageHeader from '../components/Common/PageHeader';
@@ -33,7 +33,6 @@ const Positions = () => {
   const [targetPrice, setTargetPrice] = useState(0);
   const [quantity, setQuantity] = useState(0);
   const [pricePercentage, setPricePercentage] = useState(0);
-  const [coinPrecision, setCoinPrecision] = useState(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
   // 详情抽屉相关状态
@@ -107,16 +106,29 @@ const Positions = () => {
 
   // 统一的操作处理器
   const handleAction = async (position, action) => {
+    // 验证参数
+    if (!position) {
+      console.error('handleAction: position 参数不能为空');
+      return;
+    }
+    
+    if (!action || typeof action !== 'string') {
+      console.error('handleAction: action 参数无效:', action);
+      return;
+    }
+    
+    const config = ACTIONS[action];
+    if (!config) {
+      console.error('handleAction: 未知的操作类型:', action);
+      return;
+    }
+    
     setCurrentPosition(position);
     setActionType(action);
     
     const price = getCurrentPrice(position.symbol);
     setCurrentPrice(price);
     
-    // 移除精度获取 - 后端会处理精度
-    setCoinPrecision(null);
-    
-    const config = ACTIONS[action];
     const entryPrice = position.entry_price || price;
     const isLong = position.side === 'LONG';
     
@@ -128,8 +140,9 @@ const Positions = () => {
       defaultPercentage = isLong ? -3 : 3;
     }
     
-    // 计算目标价格
-    const basePrice = config.priceBase === 'current' ? price : entryPrice;
+    // 计算目标价格，确保 config 和 config.priceBase 存在
+    const priceBase = config.priceBase || 'current';
+    const basePrice = priceBase === 'current' ? price : entryPrice;
     let defaultTargetPrice = basePrice * (1 + defaultPercentage / 100);
 
     // 设置默认数量（持仓数量的50%）
@@ -146,18 +159,19 @@ const Positions = () => {
     setPricePercentage(percentage);
     
     const config = ACTIONS[actionType];
-    const basePrice = config.priceBase === 'current' ? currentPrice : currentPosition.entry_price;
-    let newTargetPrice = basePrice * (1 + percentage / 100);
-    
-    if (coinPrecision) {
-      const { price: adjustedPrice } = autoFixPriceAndQuantity(newTargetPrice, 0, coinPrecision);
-      newTargetPrice = adjustedPrice;
+    if (!config) {
+      console.error('handlePriceSliderChange: 未知的操作类型:', actionType);
+      return;
     }
+    
+    const priceBase = config.priceBase || 'current';
+    const basePrice = priceBase === 'current' ? currentPrice : currentPosition.entry_price;
+    let newTargetPrice = basePrice * (1 + percentage / 100);
     
     setTargetPrice(newTargetPrice);
     
     // 对于加仓，价格变化时需要调整数量以保持在最大范围内
-    if (actionType === 'add_position') {
+    if (actionType === 'addition') {
       const maxUsdtAmount = accountValue.usdt_free * 0.6;
       const newMaxQuantity = (maxUsdtAmount * currentPosition.leverage) / newTargetPrice;
       
@@ -172,12 +186,6 @@ const Positions = () => {
   // 数量滑块变化处理
   const handleQuantitySliderChange = (newQuantity) => {
     let finalQuantity = newQuantity;
-    
-    if (coinPrecision) {
-      const { quantity: adjustedQuantity } = autoFixPriceAndQuantity(0, newQuantity, coinPrecision);
-      finalQuantity = adjustedQuantity;
-    }
-    
     setQuantity(finalQuantity);
   };
 
@@ -186,7 +194,7 @@ const Positions = () => {
     if (!currentPosition) return 1;
     
     const positionSize = Math.abs(currentPosition.size);
-    if (actionType === 'add_position') {
+    if (actionType === 'addition') {
       // 加仓：基于可用余额和目标价格计算，随价格变化
       const maxUsdtAmount = accountValue.usdt_free * 0.8; // 使用80%的可用余额
       const priceToUse = targetPrice > 0 ? targetPrice : currentPrice; // 使用目标价格
@@ -208,39 +216,17 @@ const Positions = () => {
     
     setConfirmLoading(true);
     try {
-      let finalPrice = targetPrice;
-      let finalQuantity = quantity;
-      
-      if (coinPrecision) {
-        const { price: adjustedPrice, quantity: adjustedQuantity } = autoFixPriceAndQuantity(targetPrice, quantity, coinPrecision);
-        finalPrice = adjustedPrice;
-        finalQuantity = adjustedQuantity;
-        
-        // 验证精度
-        const priceValidation = validatePriceComplete(finalPrice, coinPrecision);
-        if (!priceValidation.valid) {
-          message.error(`价格精度错误: ${priceValidation.error}`);
-          return;
-        }
-        
-        const quantityValidation = validateQuantityComplete(finalQuantity, coinPrecision);
-        if (!quantityValidation.valid) {
-          message.error(`数量精度错误: ${quantityValidation.error}`);
-          return;
-        }
-      }
-
       const orderData = {
         symbol: currentPosition.symbol,
         side: currentPosition.side.toLowerCase(),
-        action_type: actionType === 'add_position' ? 'open' : 'close',
-        target_price: finalPrice,
-        quantity: finalQuantity,
+        action_type: actionType,
+        target_price: targetPrice,
+        quantity: quantity,
         leverage: currentPosition.leverage,
         margin_mode: currentPosition.margin_mode || 'isolated',
         order_type: 'limit',
-        trigger_type: 'condition',
-        created_by: actionType
+        trigger_type: 'condition'
+        // created_by字段已移除
       };
 
       await api.post('/estimates', orderData);
@@ -431,7 +417,7 @@ const Positions = () => {
         extra={
           <button 
             className={`drawer-confirm-btn ${
-              actionType === 'add_position' ? 'primary' : 
+              actionType === 'addition' ? 'primary' : 
               actionType === 'take_profit' ? 'success' : 'danger'
             }`}
             onClick={handleConfirm}
@@ -511,7 +497,7 @@ const Positions = () => {
               marginTop: 24,
               border: '1px solid #bae6fd'
             }}>
-              {actionType === 'add_position' ? (
+              {actionType === 'addition' ? (
                 (() => {
                   const marginRequired = calculateUsdtAmount(quantity, targetPrice, currentPosition.leverage);
                   return (

@@ -10,7 +10,7 @@ import { ACTION_TYPE_TEXT } from '../../utils/constants';
  * @param {Function} onToggle - 监听开关回调
  */
 const MonitoringCard = ({ estimate, currentPosition, onDelete, onToggle }) => {
-  const actionText = ACTION_TYPE_TEXT[estimate.created_by] || estimate.created_by;
+  const actionText = ACTION_TYPE_TEXT[estimate.action_type] || estimate.action_type;
 
   // 计算预估盈利/止损
   const calculateEstimatedPnL = () => {
@@ -35,7 +35,7 @@ const MonitoringCard = ({ estimate, currentPosition, onDelete, onToggle }) => {
       {/* 头部信息 */}
       <div className="monitoring-header-clean">
         <div className="monitoring-info-row">
-          <span className={`monitoring-action-tag ${estimate.created_by}`}>
+          <span className={`monitoring-action-tag ${estimate.action_type}`}>
             {actionText}
           </span>
           <span className="monitoring-order-type">{estimate.order_type}</span>

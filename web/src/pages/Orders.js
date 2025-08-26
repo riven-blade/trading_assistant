@@ -237,23 +237,25 @@ const Orders = () => {
     },
     {
       title: '操作类型',
-      dataIndex: 'created_by',
-      key: 'created_by',
+      dataIndex: 'action_type',
+      key: 'action_type',
       width: 80,
-      render: (createdBy) => {
+      render: (actionType) => {
         const typeMap = {
-          'add_position': '加仓',
+          'open': '开仓',
+          'addition': '加仓',
+          'close': '平仓',
           'take_profit': '止盈', 
-          'stop_loss': '止损',
-          'open_position': '开仓'
+          'stop_loss': '止损'
         };
         const colorMap = {
-          'add_position': 'green',
+          'open': 'green',
+          'addition': 'green',
+          'close': 'purple',
           'take_profit': 'blue',
-          'stop_loss': 'red',
-          'open_position': 'orange'
+          'stop_loss': 'red'
         };
-        return <Tag color={colorMap[createdBy]}>{typeMap[createdBy] || createdBy}</Tag>;
+        return <Tag color={colorMap[actionType]}>{typeMap[actionType] || actionType}</Tag>;
       }
     },
     {
@@ -390,10 +392,91 @@ const Orders = () => {
     },
     {
       title: '方向',
-      dataIndex: 'side',
-      key: 'side',
-      width: 60,
-      render: (side) => <Tag color={side === 'BUY' ? 'green' : 'red'}>{side}</Tag>
+      key: 'direction',
+      width: 120,
+      render: (_, record) => {
+        const { side, position_side } = record;
+        
+        // 订单方向显示
+        const orderSideColor = side === 'BUY' ? 'green' : 'red';
+        
+        // 持仓方向显示
+        const getPositionSideDisplay = (positionSide) => {
+          if (!positionSide || positionSide === '') {
+            return { text: '-', color: 'default' };
+          }
+          
+          const colorMap = {
+            'LONG': 'green',
+            'SHORT': 'red', 
+            'BOTH': 'blue'
+          };
+          
+          const textMap = {
+            'LONG': '多头',
+            'SHORT': '空头',
+            'BOTH': '单向'
+          };
+          
+          return {
+            text: textMap[positionSide] || positionSide,
+            color: colorMap[positionSide] || 'default'
+          };
+        };
+        
+        const positionDisplay = getPositionSideDisplay(position_side);
+        
+        return (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            <Tag color={orderSideColor} style={{ margin: 0, fontSize: '11px' }}>
+              {side}
+            </Tag>
+            <Tag color={positionDisplay.color} style={{ margin: 0, fontSize: '11px' }}>
+              {positionDisplay.text}
+            </Tag>
+          </div>
+        );
+      }
+    },
+    {
+      title: '交易含义',
+      key: 'trade_meaning',
+      width: 100,
+      render: (_, record) => {
+        const { side, position_side } = record;
+        
+        // 分析交易含义
+        const getMeaning = (orderSide, positionSide) => {
+          if (!positionSide || positionSide === '') {
+            return { text: '未知', color: 'default' };
+          }
+          
+          switch (`${orderSide}_${positionSide}`) {
+            case 'BUY_LONG':
+              return { text: '开多仓', color: 'green' };
+            case 'SELL_SHORT':
+              return { text: '开空仓', color: 'red' };
+            case 'SELL_LONG':
+              return { text: '平多仓', color: 'orange' };
+            case 'BUY_SHORT':
+              return { text: '平空仓', color: 'cyan' };
+            case 'BUY_BOTH':
+              return { text: '买入', color: 'green' };
+            case 'SELL_BOTH':
+              return { text: '卖出', color: 'red' };
+            default:
+              return { text: '未知', color: 'default' };
+          }
+        };
+        
+        const meaning = getMeaning(side, position_side);
+        
+        return (
+          <Tag color={meaning.color} style={{ fontWeight: 'bold' }}>
+            {meaning.text}
+          </Tag>
+        );
+      }
     },
     {
       title: '类型',
@@ -751,7 +834,7 @@ const Orders = () => {
               rowKey="id"
               loading={ordersLoading}
               size="small"
-              scroll={{ x: 1000 }}
+              scroll={{ x: 1200 }}
               pagination={{
                 showSizeChanger: true,
                 showQuickJumper: true,

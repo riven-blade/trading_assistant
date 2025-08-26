@@ -8,8 +8,8 @@ import (
 	"strings"
 	"time"
 	"trading_assistant/models"
-	"trading_assistant/pkg/exchanges"
 	"trading_assistant/pkg/exchanges/binance"
+	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
 
@@ -135,21 +135,43 @@ func (oe *OrderExecutor) getDualPositionParams(actionType, side string) (orderSi
 	switch actionType {
 	case models.ActionTypeOpen: // 开仓
 		reduceOnly = false
-		if side == "long" {
-			return exchanges.OrderSideBuy, "LONG", reduceOnly // 开多仓：买入+多头方向
+		if side == types.PositionSideLong {
+			return types.OrderSideBuy, "LONG", reduceOnly // 开多仓：买入+多头方向
 		} else {
-			return exchanges.OrderSideSell, "SHORT", reduceOnly // 开空仓：卖出+空头方向
+			return types.OrderSideSell, "SHORT", reduceOnly // 开空仓：卖出+空头方向
 		}
 	case models.ActionTypeClose: // 平仓
 		reduceOnly = true // 平仓时只减仓
-		if side == "long" {
-			return exchanges.OrderSideSell, "LONG", reduceOnly // 平多仓：卖出+多头方向
+		if side == types.PositionSideLong {
+			return types.OrderSideSell, "LONG", reduceOnly // 平多仓：卖出+多头方向
 		} else {
-			return exchanges.OrderSideBuy, "SHORT", reduceOnly // 平空仓：买入+空头方向
+			return types.OrderSideBuy, "SHORT", reduceOnly // 平空仓：买入+空头方向
+		}
+	case models.ActionTypeTakeProfit: // 止盈
+		reduceOnly = true // 止盈时只减仓
+		if side == types.PositionSideLong {
+			return types.OrderSideSell, "LONG", reduceOnly
+		} else {
+			return types.OrderSideBuy, "SHORT", reduceOnly
+		}
+	case models.ActionTypeStopLoss: //
+		reduceOnly = true // 止损时只减仓
+		if side == types.PositionSideLong {
+			return types.OrderSideSell, "LONG", reduceOnly // 多头止损：卖出+多头方向
+		} else {
+			return types.OrderSideBuy, "SHORT", reduceOnly // 空头止损：买入+空头方向
+		}
+	case models.ActionTypeAddition: // 加仓
+		reduceOnly = false
+		if side == types.PositionSideLong {
+			return types.OrderSideBuy, "LONG", reduceOnly // 加多仓：买入+多头方向
+		} else {
+			return types.OrderSideSell, "SHORT", reduceOnly // 加空仓：卖出+空头方向
 		}
 	default:
-		// 默认开多仓
-		return exchanges.OrderSideBuy, "LONG", false
+		// 不应该到达这里，记录错误并返回安全的默认值
+		logrus.Errorf("未知的操作类型: %s, 使用默认开多仓", actionType)
+		return types.OrderSideBuy, "LONG", false
 	}
 }
 
@@ -248,12 +270,12 @@ func (oe *OrderExecutor) roundToDecimalPlaces(value float64, places int) float64
 // getOrderTypeAndPrice 获取订单类型和价格
 func (oe *OrderExecutor) getOrderTypeAndPrice(orderType string, targetPrice, currentPrice float64) (string, float64) {
 	switch orderType {
-	case "market":
-		return exchanges.OrderTypeMarket, 0 // 市价单不需要价格
-	case "limit":
-		return exchanges.OrderTypeLimit, targetPrice
+	case types.OrderTypeMarket:
+		return types.OrderTypeMarket, 0 // 市价单不需要价格
+	case types.OrderTypeLimit:
+		return types.OrderTypeLimit, targetPrice
 	default:
-		return exchanges.OrderTypeMarket, 0
+		return types.OrderTypeMarket, 0
 	}
 }
 
@@ -271,9 +293,9 @@ func (oe *OrderExecutor) setupTradingEnvironment(estimate *models.PriceEstimate)
 
 	// 设置保证金模式
 	if estimate.MarginMode != "" {
-		marginType := "CROSSED" // 默认全仓
-		if estimate.MarginMode == "ISOLATED" {
-			marginType = "ISOLATED"
+		marginType := types.MarginModeCrossed // 默认全仓
+		if estimate.MarginMode == types.MarginModeIsolated {
+			marginType = types.MarginModeIsolated
 		}
 
 		if err := oe.binanceClient.SetMarginType(estimate.Symbol, marginType); err != nil {
@@ -298,8 +320,8 @@ func (oe *OrderExecutor) placeOrder(params *OrderParams) (*models.Order, error) 
 		"quantity":     oe.formatQuantityString(params.Quantity),
 	}
 
-	// 如果是限价单，添加价格（字符串格式）
-	if params.Type == exchanges.OrderTypeLimit {
+	// 如果是限价单，添加价格
+	if params.Type == types.OrderTypeLimit {
 		orderParams["price"] = oe.formatPriceString(params.Price)
 		orderParams["timeInForce"] = params.TimeInForce
 	}
@@ -384,17 +406,18 @@ func (oe *OrderExecutor) convertToOrder(response *binance.FuturesOrderResponse, 
 	}
 
 	return &models.Order{
-		ID:          response.ClientOrderID,
-		Symbol:      response.Symbol,
-		Side:        response.Side,
-		Type:        response.Type,
-		Quantity:    params.Quantity,
-		ExecutedQty: executedQty,
-		Price:       avgPrice,
-		Status:      response.Status,
-		ExchangeID:  exchangeID,
-		CreatedAt:   time.Now(),
-		UpdatedAt:   time.Now(),
+		ID:           response.ClientOrderID,
+		Symbol:       response.Symbol,
+		Side:         response.Side,
+		PositionSide: response.PositionSide,
+		Type:         response.Type,
+		Quantity:     params.Quantity,
+		ExecutedQty:  executedQty,
+		Price:        avgPrice,
+		Status:       response.Status,
+		ExchangeID:   exchangeID,
+		CreatedAt:    time.Now(),
+		UpdatedAt:    time.Now(),
 	}
 }
 
@@ -417,34 +440,30 @@ func (oe *OrderExecutor) sendOrderNotification(estimate *models.PriceEstimate, o
 	}
 
 	actionText := "开仓"
-	if estimate.ActionType == models.ActionTypeClose {
+	switch estimate.ActionType {
+	case models.ActionTypeClose:
 		actionText = "平仓"
+	case models.ActionTypeTakeProfit:
+		actionText = "止盈"
+	case models.ActionTypeStopLoss:
+		actionText = "止损"
+	case models.ActionTypeAddition:
+		actionText = "加仓"
+	default:
+		actionText = "开仓"
 	}
 
 	positionText := "多头"
-	if estimate.Side == "short" {
+	if estimate.Side == types.PositionSideShort {
 		positionText = "空头"
 	}
 
-	message := fmt.Sprintf("🎯 双向持仓订单执行成功\n"+
-		"━━━━━━━━━━━━━━━━━━━━━━\n"+
-		"📈 交易对: %s\n"+
-		"📊 操作: %s %s\n"+
-		"💰 USDT金额: %.2f\n"+
-		"📦 数量: %.6f\n"+
-		"💲 价格: %.6f\n"+
-		"🎭 仓位方向: %s\n"+
-		"🔄 订单方向: %s\n"+
-		"🆔 订单ID: %s\n"+
-		"━━━━━━━━━━━━━━━━━━━━━━",
+	message := fmt.Sprintf("%s %s %s %.6f @ %.4f",
 		estimate.Symbol,
-		actionText, positionText,
-		estimate.Quantity,
+		actionText,
+		positionText,
 		params.Quantity,
-		order.Price,
-		params.PositionSide,
-		params.Side,
-		order.ExchangeID)
+		order.Price)
 
 	if err := telegram.GlobalTelegramClient.SendMessage(message); err != nil {
 		logrus.Errorf("发送订单通知失败: %v", err)

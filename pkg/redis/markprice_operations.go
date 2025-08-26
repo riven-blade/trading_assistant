@@ -3,7 +3,7 @@ package redis
 import (
 	"fmt"
 	"strconv"
-	"trading_assistant/pkg/exchanges"
+	"trading_assistant/pkg/exchanges/types"
 )
 
 // KeyMarkPrice markPrice相关的Redis键
@@ -12,7 +12,7 @@ const (
 )
 
 // SetMarkPrice 保存标记价格数据
-func (c *Client) SetMarkPrice(markPrice *exchanges.WatchMarkPrice) error {
+func (c *Client) SetMarkPrice(markPrice *types.WatchMarkPrice) error {
 	key := fmt.Sprintf("%s:%s", KeyMarkPrice, markPrice.Symbol)
 
 	// 保存markPrice数据
@@ -33,7 +33,7 @@ func (c *Client) SetMarkPrice(markPrice *exchanges.WatchMarkPrice) error {
 }
 
 // GetMarkPrice 获取标记价格数据
-func (c *Client) GetMarkPrice(symbol string) (*exchanges.WatchMarkPrice, error) {
+func (c *Client) GetMarkPrice(symbol string) (*types.WatchMarkPrice, error) {
 	key := fmt.Sprintf("%s:%s", KeyMarkPrice, symbol)
 
 	// 获取markPrice数据
@@ -49,7 +49,7 @@ func (c *Client) GetMarkPrice(symbol string) (*exchanges.WatchMarkPrice, error) 
 	}
 
 	// 解析数据
-	markPrice := &exchanges.WatchMarkPrice{
+	markPrice := &types.WatchMarkPrice{
 		Symbol: result[0].(string),
 	}
 

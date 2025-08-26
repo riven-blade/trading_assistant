@@ -4,21 +4,19 @@ import (
 	"time"
 )
 
-// 操作类型常量
+// 交易操作类型常量（5种明确的操作类型）
 const (
-	ActionTypeOpen  = "open"  // 开仓/加仓
-	ActionTypeClose = "close" // 平仓/止盈/止损
+	ActionTypeOpen       = "open"        // 开仓
+	ActionTypeAddition   = "addition"    // 加仓
+	ActionTypeClose      = "close"       // 平仓
+	ActionTypeTakeProfit = "take_profit" // 止盈
+	ActionTypeStopLoss   = "stop_loss"   // 止损
 )
 
 // 触发类型常量
 const (
 	TriggerTypeImmediate = "immediate" // 立即执行
-)
-
-// 创建者类型常量（标识具体操作类型）
-const (
-	CreatedByTakeProfit = "take_profit" // 止盈
-	CreatedByStopLoss   = "stop_loss"   // 止损
+	TriggerTypeCondition = "condition" // 条件触发
 )
 
 // 价格预估状态常量
@@ -79,18 +77,18 @@ type CoinSelection struct {
 
 // PriceEstimate 价格预估
 type PriceEstimate struct {
-	ID          string    `json:"id"`
-	Symbol      string    `json:"symbol"`       // 交易对符号
-	Side        string    `json:"side"`         // 方向：long, short
-	ActionType  string    `json:"action_type"`  // 操作类型：open(开仓/加仓), close(平仓/减仓/止盈/止损)
-	TargetPrice float64   `json:"target_price"` // 目标价格
-	Quantity    float64   `json:"quantity"`     // 交易数量
-	Leverage    int       `json:"leverage"`     // 杠杆倍数
-	OrderType   string    `json:"order_type"`   // 订单类型：market, limit
-	MarginMode  string    `json:"margin_mode"`  // 保证金模式：CROSS, ISOLATED
-	Status      string    `json:"status"`       // 状态：listening(监听状态), triggered(已触发成功), failed(触发失败)
-	Enabled     bool      `json:"enabled"`      // 监听开关：true=实际监听, false=暂不监听
-	CreatedBy   string    `json:"created_by"`   // 创建者，用于标识具体操作类型
+	ID          string  `json:"id"`
+	Symbol      string  `json:"symbol"`       // 交易对符号
+	Side        string  `json:"side"`         // 方向：long, short
+	ActionType  string  `json:"action_type"`  // 操作类型：open(开仓/加仓), close(平仓/减仓/止盈/止损)
+	TargetPrice float64 `json:"target_price"` // 目标价格
+	Quantity    float64 `json:"quantity"`     // 交易数量
+	Leverage    int     `json:"leverage"`     // 杠杆倍数
+	OrderType   string  `json:"order_type"`   // 订单类型：market, limit
+	MarginMode  string  `json:"margin_mode"`  // 保证金模式：CROSS, ISOLATED
+	Status      string  `json:"status"`       // 状态：listening(监听状态), triggered(已触发成功), failed(触发失败)
+	Enabled     bool    `json:"enabled"`      // 监听开关：true=实际监听, false=暂不监听
+	// CreatedBy字段已移除，改用ActionType明确标识操作类型
 	TriggerType string    `json:"trigger_type"` // 触发条件：immediate(立即执行), condition(条件触发)
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
@@ -111,19 +109,20 @@ type PriceData struct {
 
 // Order 订单信息
 type Order struct {
-	ID          string    `json:"id"`
-	Symbol      string    `json:"symbol"`
-	Side        string    `json:"side"`         // BUY, SELL
-	Type        string    `json:"type"`         // MARKET, LIMIT
-	Quantity    float64   `json:"quantity"`     // 原始数量
-	ExecutedQty float64   `json:"executed_qty"` // 已执行数量
-	Price       float64   `json:"price"`
-	MarginMode  string    `json:"margin_mode"` // 保证金模式：CROSS, ISOLATED
-	Status      string    `json:"status"`      // NEW, FILLED, CANCELLED
-	EstimateID  string    `json:"estimate_id"` // 关联的价格预估ID
-	ExchangeID  string    `json:"exchange_id"` // 交易所返回的订单ID
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID           string    `json:"id"`
+	Symbol       string    `json:"symbol"`
+	Side         string    `json:"side"`          // BUY, SELL (订单方向)
+	PositionSide string    `json:"position_side"` // LONG, SHORT, BOTH (持仓方向)
+	Type         string    `json:"type"`          // MARKET, LIMIT
+	Quantity     float64   `json:"quantity"`      // 原始数量
+	ExecutedQty  float64   `json:"executed_qty"`  // 已执行数量
+	Price        float64   `json:"price"`
+	MarginMode   string    `json:"margin_mode"` // 保证金模式：CROSS, ISOLATED
+	Status       string    `json:"status"`      // NEW, FILLED, CANCELLED
+	EstimateID   string    `json:"estimate_id"` // 关联的价格预估ID
+	ExchangeID   string    `json:"exchange_id"` // 交易所返回的订单ID
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 // Position 持仓信息 (双向持仓模式)

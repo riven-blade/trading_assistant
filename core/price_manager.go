@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
-	"trading_assistant/pkg/exchanges"
 	"trading_assistant/pkg/exchanges/binance"
+	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 
 	"github.com/sirupsen/logrus"
@@ -139,7 +139,7 @@ func (pm *PriceManager) UnsubscribePrice(symbol string) error {
 	return pm.unsubscribePriceUnsafe(symbol)
 }
 
-// unsubscribePriceUnsafe 取消价格订阅（不加锁版本）
+// unsubscribePriceUnsafe 取消价格订阅
 func (pm *PriceManager) unsubscribePriceUnsafe(symbol string) error {
 	// 检查订阅是否存在
 	if _, exists := pm.subscriptions[symbol]; !exists {
@@ -270,8 +270,8 @@ func (pm *PriceManager) subscribeSelectedCoins() error {
 }
 
 // createPriceHandler 创建价格数据处理器
-func (pm *PriceManager) createPriceHandler(symbol string) func(exchanges.MetaData, interface{}) error {
-	return func(metadata exchanges.MetaData, data interface{}) error {
+func (pm *PriceManager) createPriceHandler(symbol string) func(types.MetaData, interface{}) error {
+	return func(metadata types.MetaData, data interface{}) error {
 		// 更新最后数据时间
 		pm.updateLastDataTime(symbol)
 
@@ -291,7 +291,7 @@ func (pm *PriceManager) updateLastDataTime(symbol string) {
 }
 
 // processPriceData 处理markPrice数据并保存到Redis
-func (pm *PriceManager) processPriceData(symbol string, metadata exchanges.MetaData, data interface{}) error {
+func (pm *PriceManager) processPriceData(symbol string, metadata types.MetaData, data interface{}) error {
 	// 只处理选中的币种数据
 	if !redis.GlobalRedisClient.IsCoinSelected(symbol) {
 		// 如果币种不再选中，应该取消订阅
@@ -325,9 +325,9 @@ func (pm *PriceManager) processPriceData(symbol string, metadata exchanges.MetaD
 }
 
 // parseMarkPriceData 解析markPrice数据
-func (pm *PriceManager) parseMarkPriceData(symbol string, data interface{}) (*exchanges.WatchMarkPrice, error) {
+func (pm *PriceManager) parseMarkPriceData(symbol string, data interface{}) (*types.WatchMarkPrice, error) {
 	// 处理Binance WebSocket返回的WatchMarkPrice数据
-	watchMarkPrice, ok := data.(*exchanges.WatchMarkPrice)
+	watchMarkPrice, ok := data.(*types.WatchMarkPrice)
 	if !ok {
 		return nil, fmt.Errorf("无效的markPrice数据格式，期望 *exchanges.WatchMarkPrice")
 	}

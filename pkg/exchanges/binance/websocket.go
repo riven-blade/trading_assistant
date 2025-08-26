@@ -9,6 +9,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"trading_assistant/pkg/exchanges/types"
 
 	"trading_assistant/pkg/exchanges"
 
@@ -54,11 +55,11 @@ type WebSocket struct {
 	msgRateLimiter *MessageRateLimiter
 
 	// 发布函数
-	publishFunc func(exchanges.MetaData, interface{}) error
+	publishFunc func(types.MetaData, interface{}) error
 
 	// 用户数据流相关
 	userDataListenKey   string
-	userDataPublishFunc func(exchanges.MetaData, interface{}) error
+	userDataPublishFunc func(types.MetaData, interface{}) error
 	userDataConnection  *exchanges.WebSocketConnection
 	userDataActive      int32 // 0=未激活, 1=已激活
 	userDataStopCh      chan struct{}
@@ -308,7 +309,7 @@ func (ws *WebSocket) parseAndPublish(msg map[string]interface{}) error {
 	}
 
 	// 构造MetaData
-	metaData := exchanges.MetaData{
+	metaData := types.MetaData{
 		Exchange:  "binance",
 		Market:    ws.getMarketType(),
 		MarketID:  symbol,
@@ -346,7 +347,7 @@ func (ws *WebSocket) parseStreamInfo(streamName string) (eventType, symbol strin
 }
 
 // parseDepthUpdate 解析深度更新
-func (ws *WebSocket) parseDepthUpdate(msg map[string]interface{}) *exchanges.WatchOrderBook {
+func (ws *WebSocket) parseDepthUpdate(msg map[string]interface{}) *types.WatchOrderBook {
 	symbol := strings.ToUpper(ws.SafeString(msg, FieldSymbol, ""))
 	if symbol == "" {
 		return nil
@@ -378,7 +379,7 @@ func (ws *WebSocket) parseDepthUpdate(msg map[string]interface{}) *exchanges.Wat
 		}
 	}
 
-	return &exchanges.WatchOrderBook{
+	return &types.WatchOrderBook{
 		Symbol:    symbol,
 		TimeStamp: ws.extractTimestamp(msg),
 		Bids:      bids,
@@ -388,7 +389,7 @@ func (ws *WebSocket) parseDepthUpdate(msg map[string]interface{}) *exchanges.Wat
 }
 
 // parseKline 解析K线数据
-func (ws *WebSocket) parseKline(msg map[string]interface{}) *exchanges.Kline {
+func (ws *WebSocket) parseKline(msg map[string]interface{}) *types.Kline {
 	klineData, ok := msg[FieldKlineData].(map[string]interface{})
 	if !ok {
 		return nil
@@ -399,7 +400,7 @@ func (ws *WebSocket) parseKline(msg map[string]interface{}) *exchanges.Kline {
 		return nil
 	}
 
-	return &exchanges.Kline{
+	return &types.Kline{
 		Symbol:    symbol,
 		Timeframe: ws.SafeString(klineData, FieldKlineInterval, ""),
 		Timestamp: ws.SafeInt(klineData, FieldKlineStartTime, 0),
@@ -413,13 +414,13 @@ func (ws *WebSocket) parseKline(msg map[string]interface{}) *exchanges.Kline {
 }
 
 // parseBookTicker 解析最优订单簿价格
-func (ws *WebSocket) parseBookTicker(msg map[string]interface{}) *exchanges.WatchBookTicker {
+func (ws *WebSocket) parseBookTicker(msg map[string]interface{}) *types.WatchBookTicker {
 	symbol := strings.ToUpper(ws.SafeString(msg, FieldSymbol, ""))
 	if symbol == "" {
 		return nil
 	}
 
-	return &exchanges.WatchBookTicker{
+	return &types.WatchBookTicker{
 		Symbol:      symbol,
 		TimeStamp:   ws.extractTimestamp(msg),
 		BidPrice:    ws.SafeFloat(msg, FieldBidPrice, 0),
@@ -430,13 +431,13 @@ func (ws *WebSocket) parseBookTicker(msg map[string]interface{}) *exchanges.Watc
 }
 
 // parseMarkPrice 解析标记价格
-func (ws *WebSocket) parseMarkPrice(msg map[string]interface{}) *exchanges.WatchMarkPrice {
+func (ws *WebSocket) parseMarkPrice(msg map[string]interface{}) *types.WatchMarkPrice {
 	symbol := strings.ToUpper(ws.SafeString(msg, FieldSymbol, ""))
 	if symbol == "" {
 		return nil
 	}
 
-	return &exchanges.WatchMarkPrice{
+	return &types.WatchMarkPrice{
 		Symbol:      symbol,
 		TimeStamp:   ws.extractTimestamp(msg),
 		MarkPrice:   ws.SafeFloat(msg, FieldMarkPrice, 0),
@@ -449,8 +450,8 @@ func (ws *WebSocket) parseMarkPrice(msg map[string]interface{}) *exchanges.Watch
 // ========== 用户数据流解析方法 ==========
 
 // parseAccountUpdate 解析账户更新事件
-func (ws *WebSocket) parseAccountUpdate(msg map[string]interface{}) *exchanges.WatchAccountUpdate {
-	result := &exchanges.WatchAccountUpdate{
+func (ws *WebSocket) parseAccountUpdate(msg map[string]interface{}) *types.WatchAccountUpdate {
+	result := &types.WatchAccountUpdate{
 		EventType:       ws.SafeString(msg, FieldEventType, ""),
 		EventTime:       ws.SafeInt(msg, FieldEventTime, 0),
 		TransactionTime: ws.SafeInt(msg, "T", 0), // 交易时间
@@ -463,7 +464,7 @@ func (ws *WebSocket) parseAccountUpdate(msg map[string]interface{}) *exchanges.W
 		if balancesData, ok := accountData["B"].([]interface{}); ok {
 			for _, balanceItem := range balancesData {
 				if balanceData, ok := balanceItem.(map[string]interface{}); ok {
-					balance := exchanges.WatchBalanceUpdate{
+					balance := types.WatchBalanceUpdate{
 						EventType:          result.EventType,
 						EventTime:          result.EventTime,
 						Asset:              ws.SafeString(balanceData, "a", ""), // 资产名称
@@ -481,7 +482,7 @@ func (ws *WebSocket) parseAccountUpdate(msg map[string]interface{}) *exchanges.W
 		if positionsData, ok := accountData["P"].([]interface{}); ok {
 			for _, positionItem := range positionsData {
 				if positionData, ok := positionItem.(map[string]interface{}); ok {
-					position := exchanges.WatchPositionUpdate{
+					position := types.WatchPositionUpdate{
 						EventType:              result.EventType,
 						EventTime:              result.EventTime,
 						Symbol:                 ws.SafeString(positionData, "s", ""),  // 交易对
@@ -504,7 +505,7 @@ func (ws *WebSocket) parseAccountUpdate(msg map[string]interface{}) *exchanges.W
 }
 
 // parseOrderTradeUpdate 解析订单交易更新事件
-func (ws *WebSocket) parseOrderTradeUpdate(msg map[string]interface{}) *exchanges.WatchOrderUpdate {
+func (ws *WebSocket) parseOrderTradeUpdate(msg map[string]interface{}) *types.WatchOrderUpdate {
 	// 获取订单数据
 	var orderData map[string]interface{}
 	if data, ok := msg["o"].(map[string]interface{}); ok {
@@ -513,7 +514,7 @@ func (ws *WebSocket) parseOrderTradeUpdate(msg map[string]interface{}) *exchange
 		orderData = msg
 	}
 
-	return &exchanges.WatchOrderUpdate{
+	return &types.WatchOrderUpdate{
 		EventType:          ws.SafeString(msg, FieldEventType, ""),
 		EventTime:          ws.SafeInt(msg, FieldEventTime, 0),
 		Symbol:             ws.SafeString(orderData, "s", ""),            // 交易对
@@ -911,7 +912,7 @@ func (ws *WebSocket) getWebSocketURL() string {
 // ========== 用户数据流管理 ==========
 
 // SubscribeUserData 订阅用户数据流
-func (ws *WebSocket) SubscribeUserData(listenKey string, publishFunc func(exchanges.MetaData, interface{}) error) error {
+func (ws *WebSocket) SubscribeUserData(listenKey string, publishFunc func(types.MetaData, interface{}) error) error {
 	if atomic.LoadInt32(&ws.userDataActive) == 1 {
 		return fmt.Errorf("user data stream already active")
 	}
@@ -1053,7 +1054,7 @@ func (ws *WebSocket) handleUserDataMessage(data []byte) error {
 	}
 
 	// 构造MetaData
-	metaData := exchanges.MetaData{
+	metaData := types.MetaData{
 		Exchange:  "binance",
 		Market:    ws.getMarketType(),
 		DataType:  ws.convertEventTypeToDataType(eventType),

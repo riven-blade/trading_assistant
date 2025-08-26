@@ -6,8 +6,8 @@ import (
 	"syscall"
 	"trading_assistant/core"
 	"trading_assistant/pkg/config"
-	"trading_assistant/pkg/exchanges"
 	"trading_assistant/pkg/exchanges/binance"
+	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
 	"trading_assistant/servers"
@@ -34,15 +34,15 @@ func main() {
 		config.GlobalConfig.BinanceAPIKey,
 		config.GlobalConfig.BinanceSecretKey,
 	)
-	binanceConfig.MarketType = exchanges.MarketTypeFuture      // 期货市场
+	binanceConfig.MarketType = types.MarketTypeFuture          // 期货市场
 	binanceConfig.TestNet = config.GlobalConfig.BinanceTestnet // 应用测试网配置
 
 	// 输出配置信息用于调试
 	logrus.WithFields(logrus.Fields{
-		"api_key_length": len(config.GlobalConfig.BinanceAPIKey),
-		"has_secret":     len(config.GlobalConfig.BinanceSecretKey) > 0,
-		"testnet":        config.GlobalConfig.BinanceTestnet,
-		"market_type":    binanceConfig.MarketType,
+		"has_api_key": len(config.GlobalConfig.BinanceAPIKey) > 0,
+		"has_secret":  len(config.GlobalConfig.BinanceSecretKey) > 0,
+		"testnet":     config.GlobalConfig.BinanceTestnet,
+		"market_type": binanceConfig.MarketType,
 	}).Info("Binance配置信息")
 
 	binanceClient, err := binance.New(binanceConfig)

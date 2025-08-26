@@ -1,19 +1,7 @@
-package exchanges
+package types
 
 import (
 	"time"
-)
-
-// WebSocket 流事件常量
-const (
-	StreamEventMiniTicker = "miniTicker"
-	StreamEventBookTicker = "bookTicker"
-	StreamEventKline      = "kline"
-	StreamEventTrade      = "trade"
-	StreamEventOrderBook  = "orderbook"
-	StreamEventMarkPrice  = "markPrice"
-	StreamEventBalance    = "balance"
-	StreamEventOrders     = "orders"
 )
 
 // MetaData 元数据结构
@@ -217,7 +205,8 @@ type Order struct {
 	Symbol             string                 `json:"symbol"`             // 交易对
 	Type               string                 `json:"type"`               // 订单类型
 	TimeInForce        string                 `json:"timeInForce"`        // 时效类型
-	Side               string                 `json:"side"`               // buy/sell
+	Side               string                 `json:"side"`               // buy/sell (订单方向)
+	PositionSide       string                 `json:"positionSide"`       // LONG/SHORT/BOTH (持仓方向) - 双向持仓关键字段
 	Amount             float64                `json:"amount"`             // 数量
 	Price              float64                `json:"price"`              // 价格
 	Average            float64                `json:"average"`            // 平均成交价
@@ -496,20 +485,21 @@ const (
 
 // 保证金模式
 const (
-	MarginModeIsolated = "isolated"
-	MarginModeCross    = "cross"
-)
-
-// 交易记录类型
-const (
-	TakerOrMakerTaker = "taker"
-	TakerOrMakerMaker = "maker"
+	MarginModeIsolated = "ISOLATED"
+	MarginModeCross    = "CROSS"
+	MarginModeCrossed  = "CROSSED"
 )
 
 // 交易方向
 const (
 	TradeSideBuy  = "BUY"
 	TradeSideSell = "SELL"
+)
+
+// 交易记录类型
+const (
+	TakerOrMakerTaker = "taker"
+	TakerOrMakerMaker = "maker"
 )
 
 // 精度模式
@@ -533,7 +523,7 @@ const (
 	ContractTypeOption  = "option"
 )
 
-// WebSocket 用户流事件常量 (Binance)
+// WebSocket
 const (
 	UserStreamBalance = "outboundAccountPosition"
 	UserStreamOrders  = "executionReport"
@@ -546,7 +536,7 @@ type PriceLevel struct {
 	Amount float64 `json:"amount"`
 }
 
-// LeverageInfo 杠杆信息 (用于设置杠杆的返回值)
+// LeverageInfo 杠杆信息
 type LeverageInfo struct {
 	Symbol   string                 `json:"symbol"`   // 交易对
 	Leverage int                    `json:"leverage"` // 杠杆倍数

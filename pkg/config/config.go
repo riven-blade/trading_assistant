@@ -25,8 +25,8 @@ type Config struct {
 	TelegramChatID   string
 
 	// 服务配置
-	HTTPPort string
 	LogLevel string
+	BaseURL  string
 
 	// 交易配置
 	PositionMode string // both: 双向持仓, single: 单向持仓
@@ -58,8 +58,8 @@ func LoadConfig() {
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramChatID:   getEnv("TELEGRAM_CHAT_ID", ""),
 
-		HTTPPort: getEnv("HTTP_PORT", "8080"),
 		LogLevel: getEnv("LOG_LEVEL", "info"),
+		BaseURL:  getEnv("BASE_URL", "localhost"),
 
 		PositionMode: getEnv("POSITION_MODE", "both"),
 

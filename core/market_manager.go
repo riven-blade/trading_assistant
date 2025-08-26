@@ -304,7 +304,7 @@ func (mm *MarketManager) syncPriceData() error {
 		"total_coins":   len(coins),
 		"success_count": successCount,
 		"error_count":   errorCount,
-		"api_requests":  1, // 🎯 只用了1次API请求！
+		"api_requests":  1, // 只用了1次API请求
 	}).Info("价格数据同步完成")
 
 	return nil

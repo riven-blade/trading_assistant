@@ -13,6 +13,7 @@ import {
   Row,
   Col,
 } from 'antd';
+
 import { 
   PlusOutlined, 
   ReloadOutlined
@@ -68,7 +69,7 @@ const TradingPairs = () => {
   const [targetPrice, setTargetPrice] = useState(0);
   const [orderType, setOrderType] = useState(DEFAULT_CONFIG.orderType);
   const [quantity, setQuantity] = useState(0.001);
-  const [marginMode, setMarginMode] = useState('isolated'); // 默认逐仓模式
+  const [marginMode, setMarginMode] = useState(DEFAULT_CONFIG.marginMode); // 默认全仓模式
 
   // 使用自定义Hooks
   const { 
@@ -291,7 +292,7 @@ const TradingPairs = () => {
     // 重置状态到默认值
     setSelectedLeverage(DEFAULT_CONFIG.leverage);
     setOrderType(DEFAULT_CONFIG.orderType);
-    setMarginMode('isolated');
+    setMarginMode(DEFAULT_CONFIG.marginMode);
     
     setTradeModalVisible(true);
   };
@@ -320,6 +321,11 @@ const TradingPairs = () => {
         break;
       case 'delete':
         removePair(symbol);
+        break;
+      case 'kline':
+        // 在新窗口打开K线页面
+        const klineUrl = `${window.location.origin}/klines?symbol=${symbol}&interval=1d`;
+        window.open(klineUrl, '_blank', 'noopener,noreferrer');
         break;
       default:
         break;
@@ -373,8 +379,8 @@ const TradingPairs = () => {
         leverage: selectedLeverage,
         margin_mode: marginMode,
         order_type: orderType,
-        trigger_type: 'condition',
-        created_by: 'open_position'
+        trigger_type: 'condition'
+        // created_by字段已移除
       };
 
       await api.post('/estimates', orderData);

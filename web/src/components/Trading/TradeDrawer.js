@@ -1,5 +1,5 @@
 import React from 'react';
-import { Drawer, Form, Typography, Tag, Select, Button, Space } from 'antd';
+import { Drawer, Form, Typography, Tag, Select, Button } from 'antd';
 import TradingSlider from './TradingSlider';
 
 const { Text } = Typography;
@@ -83,12 +83,9 @@ const TradeDrawer = ({
       onClose={onClose}
       open={visible}
       extra={
-        <Space>
-          <Button onClick={onClose}>取消</Button>
-          <Button type="primary" onClick={onSubmit}>
-            确认{side === 'long' ? '开多' : '开空'}
-          </Button>
-        </Space>
+        <Button type="primary" onClick={onSubmit}>
+          确认{side === 'long' ? '开多' : '开空'}
+        </Button>
       }
     >
       <Form layout="vertical">
@@ -225,8 +222,8 @@ const TradeDrawer = ({
             onChange={onMarginModeChange}
             style={{ width: '100%' }}
           >
-            <Select.Option value="isolated">逐仓模式</Select.Option>
-            <Select.Option value="cross">全仓模式</Select.Option>
+            <Select.Option value="ISOLATED">逐仓模式</Select.Option>
+            <Select.Option value="CROSS">全仓模式</Select.Option>
           </Select>
         </Form.Item>
 

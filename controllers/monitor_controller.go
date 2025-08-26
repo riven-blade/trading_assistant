@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 	"trading_assistant/models"
-	"trading_assistant/pkg/exchanges"
 	"trading_assistant/pkg/exchanges/binance"
+	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 
 	"github.com/gin-gonic/gin"
@@ -16,7 +16,7 @@ import (
 )
 
 // calculateBalanceSummary 计算余额汇总信息
-func calculateBalanceSummary(account *exchanges.Account) map[string]interface{} {
+func calculateBalanceSummary(account *types.Account) map[string]interface{} {
 	summary := map[string]interface{}{
 		"total_value":        0.0,
 		"usdt_total":         0.0,
@@ -110,22 +110,23 @@ func NewMonitorController(binanceClient *binance.Binance) *MonitorController {
 }
 
 // convertOrders 转换订单格式
-func (m *MonitorController) convertOrders(exchangeOrders []*exchanges.Order) []*models.Order {
+func (m *MonitorController) convertOrders(exchangeOrders []*types.Order) []*models.Order {
 	orders := make([]*models.Order, 0, len(exchangeOrders))
 
 	for _, exOrder := range exchangeOrders {
 		order := &models.Order{
-			ID:          exOrder.ID,
-			Symbol:      exOrder.Symbol,
-			Side:        strings.ToUpper(exOrder.Side),
-			Type:        strings.ToUpper(exOrder.Type),
-			Quantity:    exOrder.Amount,
-			ExecutedQty: exOrder.Filled,
-			Price:       exOrder.Price,
-			Status:      strings.ToUpper(exOrder.Status),
-			ExchangeID:  exOrder.ID,
-			CreatedAt:   time.UnixMilli(exOrder.Timestamp),
-			UpdatedAt:   time.UnixMilli(exOrder.LastTradeTimestamp),
+			ID:           exOrder.ID,
+			Symbol:       exOrder.Symbol,
+			Side:         strings.ToUpper(exOrder.Side),
+			PositionSide: strings.ToUpper(exOrder.PositionSide), // 关键修复：添加持仓方向
+			Type:         strings.ToUpper(exOrder.Type),
+			Quantity:     exOrder.Amount,
+			ExecutedQty:  exOrder.Filled,
+			Price:        exOrder.Price,
+			Status:       strings.ToUpper(exOrder.Status),
+			ExchangeID:   exOrder.ID,
+			CreatedAt:    time.UnixMilli(exOrder.Timestamp),
+			UpdatedAt:    time.UnixMilli(exOrder.LastTradeTimestamp),
 		}
 		orders = append(orders, order)
 	}
@@ -195,7 +196,7 @@ func (m *MonitorController) GetOrders(ctx *gin.Context) {
 func (m *MonitorController) GetPositions(ctx *gin.Context) {
 	// 优先从Redis缓存获取持仓数据
 	if redis.GlobalRedisClient != nil {
-		var cachedPositions []*exchanges.Position
+		var cachedPositions []*types.Position
 		cacheKey := redis.CacheKeyPositions
 		if err := redis.GlobalRedisClient.GetCache(cacheKey, &cachedPositions); err == nil {
 			// 转换为前端需要的格式
@@ -204,14 +205,14 @@ func (m *MonitorController) GetPositions(ctx *gin.Context) {
 				pos := cachedPositions[i]
 
 				// 转换保证金模式格式
-				marginMode := "CROSS"
-				if pos.MarginType == "ISOLATED" {
-					marginMode = "ISOLATED"
+				marginMode := types.MarginModeCross
+				if pos.MarginType == types.MarginModeIsolated {
+					marginMode = types.MarginModeIsolated
 				}
 
 				position := &models.Position{
 					Symbol:            pos.Symbol,
-					Side:              strings.ToUpper(pos.Side), // 统一转换为大写
+					Side:              strings.ToUpper(pos.Side),
 					Size:              pos.Size,
 					EntryPrice:        pos.EntryPrice,
 					MarkPrice:         pos.MarkPrice,
@@ -272,7 +273,7 @@ func (m *MonitorController) GetBalances(ctx *gin.Context) {
 
 	// 尝试从普通缓存获取详细余额
 	if redis.GlobalRedisClient != nil {
-		var cachedAccount *exchanges.Account
+		var cachedAccount *types.Account
 		cacheKey := redis.CacheKeyBalances
 		if err := redis.GlobalRedisClient.GetCache(cacheKey, &cachedAccount); err == nil {
 			// 计算余额汇总
@@ -299,31 +300,6 @@ func (m *MonitorController) GetBalances(ctx *gin.Context) {
 		"cached":  false,
 		"source":  "no_cache",
 		"message": "余额数据不在缓存中，请等待自动刷新",
-	})
-}
-
-// GetWebSocketStatus 获取WebSocket状态
-func (m *MonitorController) GetWebSocketStatus(ctx *gin.Context) {
-	status := gin.H{
-		"user_data_stream": gin.H{
-			"status":      "运行中",
-			"description": "用户数据流WebSocket连接",
-			"running":     true,
-		},
-		"market_data": gin.H{
-			"status":      "运行中",
-			"description": "市场数据订阅",
-			"running":     true,
-		},
-		"account_manager": gin.H{
-			"status":      "运行中",
-			"description": "账户管理器实时监听",
-			"running":     true,
-		},
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{
-		"data": status,
 	})
 }
 
@@ -390,7 +366,7 @@ func (m *MonitorController) CancelOrder(ctx *gin.Context) {
 	}
 
 	if err := ctx.ShouldBindJSON(&requestBody); err != nil {
-		logrus.Errorf("解析请求体失败: %v", err)
+		logrus.Warnf("取消订单参数解析失败: %v", err)
 		ctx.JSON(http.StatusBadRequest, gin.H{
 			"success": false,
 			"message": "请求参数格式错误",

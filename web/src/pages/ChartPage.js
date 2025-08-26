@@ -4,6 +4,7 @@ import {
   Spin, 
   Empty
 } from 'antd';
+import { useLocation, useSearchParams } from 'react-router-dom';
 import { init, dispose, registerOverlay } from 'klinecharts';
 
 import ChartToolbar from '../components/Chart/ChartToolbar';
@@ -122,9 +123,46 @@ registerOverlay({
 });
 
 const ChartPage = () => {
+  const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // 解析URL参数的辅助函数
+  const parseUrlParams = (search) => {
+    const searchParams = new URLSearchParams(search);
+    return {
+      symbol: searchParams.get('symbol') || 'BTCUSDT',
+      interval: searchParams.get('interval') || '5m'
+    };
+  };
+  
   // 基础状态管理
-  const [selectedCoin, setSelectedCoin] = useState('BTCUSDT');
-  const [selectedInterval, setSelectedInterval] = useState('5m');
+  const [selectedCoin, setSelectedCoin] = useState(() => parseUrlParams(location.search).symbol);
+  const [selectedInterval, setSelectedInterval] = useState(() => parseUrlParams(location.search).interval);
+
+  // 同步更新币种状态和URL
+  const handleCoinChange = useCallback((newCoin) => {
+    if (newCoin !== selectedCoin) {
+      setSelectedCoin(newCoin);
+      const newParams = new URLSearchParams(searchParams);
+      newParams.set('symbol', newCoin);
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [selectedCoin, searchParams, setSearchParams]);
+
+  // 同步更新周期状态和URL
+  const handleIntervalChange = useCallback((newInterval) => {
+    if (newInterval !== selectedInterval) {
+      setSelectedInterval(newInterval);
+      const newParams = new URLSearchParams(searchParams);
+      newParams.set('interval', newInterval);
+      setSearchParams(newParams, { replace: true });
+    }
+  }, [selectedInterval, searchParams, setSearchParams]);
+  
+  // 解析URL参数的回调函数
+  const getUrlParams = useCallback(() => {
+    return parseUrlParams(location.search);
+  }, [location.search]);
   const [coins, setCoins] = useState([]);
   const [loading, setLoading] = useState(false);
   const [klineData, setKlineData] = useState([]);
@@ -157,6 +195,17 @@ const ChartPage = () => {
   const positionLineIds = useRef(new Set()); // 跟踪已绘制的仓位线
 
 
+
+  // 监听URL参数变化
+  useEffect(() => {
+    const params = getUrlParams();
+    if (params.symbol !== selectedCoin) {
+      setSelectedCoin(params.symbol);
+    }
+    if (params.interval !== selectedInterval) {
+      setSelectedInterval(params.interval);
+    }
+  }, [getUrlParams, selectedCoin, selectedInterval]);
 
   // 移动端检测
   useEffect(() => {
@@ -1029,9 +1078,9 @@ const ChartPage = () => {
         <ChartToolbar
           selectedCoin={selectedCoin}
           coins={coins}
-          onCoinChange={setSelectedCoin}
+          onCoinChange={handleCoinChange}
           selectedInterval={selectedInterval}
-          onIntervalChange={setSelectedInterval}
+          onIntervalChange={handleIntervalChange}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
           onRefresh={handleRefresh}

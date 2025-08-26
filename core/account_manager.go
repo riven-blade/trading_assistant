@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 	"trading_assistant/models"
-	"trading_assistant/pkg/exchanges"
 	"trading_assistant/pkg/exchanges/binance"
+	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
 
@@ -85,11 +85,6 @@ func (am *AccountManager) initializeData() {
 
 	logrus.Info("开始初始化账户数据...")
 
-	// 发送Telegram通知
-	if telegram.GlobalTelegramClient != nil {
-		telegram.GlobalTelegramClient.SendMessage("🔄 开始初始化账户数据...")
-	}
-
 	// 主动获取初始余额数据
 	logrus.Info("正在获取初始余额数据...")
 	am.refreshBalances()
@@ -102,7 +97,7 @@ func (am *AccountManager) initializeData() {
 
 	// 发送完成通知
 	if telegram.GlobalTelegramClient != nil {
-		telegram.GlobalTelegramClient.SendMessage("✅ 账户数据初始化完成")
+		telegram.GlobalTelegramClient.SendMessage("账户已连接")
 	}
 }
 
@@ -122,7 +117,7 @@ func (am *AccountManager) startUserDataStream() {
 
 		// 发送故障通知
 		if telegram.GlobalTelegramClient != nil {
-			err = telegram.GlobalTelegramClient.SendMessage(fmt.Sprintf("⚠️ 用户数据流启动失败: %v", err))
+			err = telegram.GlobalTelegramClient.SendMessage("连接失败")
 			if err != nil {
 				logrus.Errorf("发送Telegram通知失败: %v", err)
 			}
@@ -131,26 +126,21 @@ func (am *AccountManager) startUserDataStream() {
 	}
 
 	logrus.Info("用户数据流监听已启动，实时监控账户变化")
-
-	// 发送成功通知
-	if telegram.GlobalTelegramClient != nil {
-		telegram.GlobalTelegramClient.SendMessage("✅ 用户数据流监听已启动，开始实时监控")
-	}
 }
 
 // handleUserDataMessage 处理用户数据流消息
-func (am *AccountManager) handleUserDataMessage(metadata exchanges.MetaData, data interface{}) error {
+func (am *AccountManager) handleUserDataMessage(metadata types.MetaData, data interface{}) error {
 	logrus.Infof("📨 收到用户数据流消息，类型: %s", metadata.DataType)
 
 	switch metadata.DataType {
 	case "account":
-		if accountUpdate, ok := data.(*exchanges.WatchAccountUpdate); ok {
+		if accountUpdate, ok := data.(*types.WatchAccountUpdate); ok {
 			return am.handleAccountUpdate(accountUpdate)
 		} else {
 			logrus.Warnf("account数据类型转换失败: %T", data)
 		}
 	case "order":
-		if orderUpdate, ok := data.(*exchanges.WatchOrderUpdate); ok {
+		if orderUpdate, ok := data.(*types.WatchOrderUpdate); ok {
 			return am.handleOrderUpdate(orderUpdate)
 		} else {
 			logrus.Warnf("order数据类型转换失败: %T", data)
@@ -163,7 +153,7 @@ func (am *AccountManager) handleUserDataMessage(metadata exchanges.MetaData, dat
 }
 
 // handleAccountUpdate 处理账户更新事件
-func (am *AccountManager) handleAccountUpdate(accountUpdate *exchanges.WatchAccountUpdate) error {
+func (am *AccountManager) handleAccountUpdate(accountUpdate *types.WatchAccountUpdate) error {
 	logrus.Infof("收到账户更新事件，余额数量: %d，持仓数量: %d",
 		len(accountUpdate.Balances), len(accountUpdate.Positions))
 
@@ -260,7 +250,7 @@ func (am *AccountManager) refreshBalances() {
 
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
-		message := fmt.Sprintf("💰 余额已更新\n净资产价值: %.2f USDT\n可用USDT: %.2f\n持仓数量: %d",
+		message := fmt.Sprintf("余额 %.2f USDT | 可用 %.2f | 持仓 %d",
 			balanceSummary["net_value"], balanceSummary["usdt_free"], positionCount)
 		telegram.GlobalTelegramClient.SendMessage(message)
 	}
@@ -299,18 +289,21 @@ func (am *AccountManager) refreshPositions() {
 			logrus.Infof("已缓存 %d 个持仓到Redis", len(positions))
 		}
 
+		// 自动选择有仓位的币种
+		am.ensurePositionCoinsSelected(positions)
+
 		// 逐个存储持仓信息
 		for i := range positions {
 			position := positions[i]
 			// 转换保证金模式格式
-			marginMode := "CROSS"
-			if position.MarginType == "ISOLATED" {
-				marginMode = "ISOLATED"
+			marginMode := types.MarginModeCross
+			if position.MarginType == types.MarginModeIsolated {
+				marginMode = types.MarginModeIsolated
 			}
 
 			positionModel := &models.Position{
 				Symbol:            position.Symbol,
-				Side:              strings.ToUpper(position.Side), // 统一转换为大写
+				Side:              strings.ToUpper(position.Side),
 				Size:              position.Size,
 				EntryPrice:        position.EntryPrice,
 				MarkPrice:         position.MarkPrice,
@@ -339,7 +332,7 @@ func (am *AccountManager) refreshPositions() {
 
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
-		message := fmt.Sprintf("📊 持仓已更新\n持仓数量: %d\n总未实现盈亏: %.4f USDT",
+		message := fmt.Sprintf("持仓 %d | PNL %.4f",
 			len(positions), totalPnl)
 		telegram.GlobalTelegramClient.SendMessage(message)
 	}
@@ -347,8 +340,53 @@ func (am *AccountManager) refreshPositions() {
 	logrus.Info("持仓数据刷新完成")
 }
 
+// ensurePositionCoinsSelected 确保有仓位的币种被自动选中
+func (am *AccountManager) ensurePositionCoinsSelected(positions []*types.Position) {
+	if len(positions) == 0 {
+		return
+	}
+
+	// 统计处理的币种
+	var autoSelectedCount int
+	var alreadySelectedCount int
+
+	// 遍历每个持仓
+	for i := range positions {
+		position := positions[i]
+		if position.Size == 0 {
+			continue // 跳过空仓位
+		}
+
+		symbol := position.Symbol
+
+		// 检查是否已经被选中
+		if redis.GlobalRedisClient.IsCoinSelected(symbol) {
+			alreadySelectedCount++
+			logrus.Debugf("币种 %s 已被选中，有仓位: %.6f", symbol, position.Size)
+			continue
+		}
+
+		// 自动选择该币种
+		if err := redis.GlobalRedisClient.SetCoinSelection(symbol, models.CoinSelectionActive); err != nil {
+			logrus.Errorf("自动选择币种 %s 失败: %v", symbol, err)
+			continue
+		}
+
+		autoSelectedCount++
+		logrus.Infof("自动选择币种 %s，当前仓位: %.6f %s", symbol, position.Size, position.Side)
+	}
+
+	if autoSelectedCount > 0 || alreadySelectedCount > 0 {
+		logrus.WithFields(logrus.Fields{
+			"total_positions":  len(positions),
+			"auto_selected":    autoSelectedCount,
+			"already_selected": alreadySelectedCount,
+		}).Info("仓位币种自动选择完成")
+	}
+}
+
 // calculateBalanceSummary 计算余额汇总信息
-func (am *AccountManager) calculateBalanceSummary(account *exchanges.Account) map[string]interface{} {
+func (am *AccountManager) calculateBalanceSummary(account *types.Account) map[string]interface{} {
 	summary := map[string]interface{}{
 		"total_value":        0.0,
 		"usdt_total":         0.0,
@@ -431,7 +469,7 @@ func (am *AccountManager) calculateBalanceSummary(account *exchanges.Account) ma
 }
 
 // handleOrderUpdate 处理订单更新事件
-func (am *AccountManager) handleOrderUpdate(orderUpdate *exchanges.WatchOrderUpdate) error {
+func (am *AccountManager) handleOrderUpdate(orderUpdate *types.WatchOrderUpdate) error {
 	logrus.Infof("收到订单更新: %s %s %s 执行类型: %s",
 		orderUpdate.Symbol, orderUpdate.Side, orderUpdate.OrderStatus, orderUpdate.ExecutionType)
 
@@ -455,21 +493,14 @@ func (am *AccountManager) handleOrderUpdate(orderUpdate *exchanges.WatchOrderUpd
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
 		// 构造通知消息
-		message := fmt.Sprintf("📋 订单更新\n交易对: %s\n方向: %s\n状态: %s\n执行类型: %s\n价格: %.8f\n数量: %.8f",
+		message := fmt.Sprintf("%s %s %s @ %.4f",
 			orderUpdate.Symbol,
 			orderUpdate.Side,
 			orderUpdate.OrderStatus,
-			orderUpdate.ExecutionType,
-			orderUpdate.OriginalPrice,
-			orderUpdate.OriginalQuantity)
+			orderUpdate.OriginalPrice)
 
 		if orderUpdate.LastQuantityFilled > 0 {
-			message += fmt.Sprintf("\n成交数量: %.8f\n成交价格: %.8f",
-				orderUpdate.LastQuantityFilled, orderUpdate.LastPriceFilled)
-		}
-
-		if orderUpdate.RealizedProfit != 0 {
-			message += fmt.Sprintf("\n实现盈亏: %.8f", orderUpdate.RealizedProfit)
+			message += fmt.Sprintf(" | 成交 %.4f", orderUpdate.LastQuantityFilled)
 		}
 
 		if err := telegram.GlobalTelegramClient.SendMessage(message); err != nil {

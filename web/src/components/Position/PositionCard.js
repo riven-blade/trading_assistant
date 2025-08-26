@@ -103,7 +103,7 @@ const PositionCard = ({ position, currentPrice, onAction, onViewDetails }) => {
         <div className="control-group">
           <button 
             className="control-btn primary-btn"
-            onClick={() => onAction(position, 'add_position')}
+            onClick={() => onAction(position, 'addition')}
           >
             加仓
           </button>

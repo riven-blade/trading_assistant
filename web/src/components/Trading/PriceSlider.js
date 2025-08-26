@@ -9,7 +9,6 @@ import TradingSlider from './TradingSlider';
  * @param {number} percentage - 价格百分比
  * @param {Function} onPercentageChange - 百分比变化回调
  * @param {number} targetPrice - 目标价格
- * @param {Object} precision - 精度信息
  * @param {Object} config - 操作配置
  */
 const PriceSlider = ({ 
@@ -19,7 +18,6 @@ const PriceSlider = ({
   percentage, 
   onPercentageChange, 
   targetPrice, 
-  precision,
   config 
 }) => {
   

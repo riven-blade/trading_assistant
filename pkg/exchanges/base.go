@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"trading_assistant/pkg/exchanges/types"
 )
 
 // ========== 配置和常量 ==========
@@ -54,8 +55,8 @@ type BaseExchange struct {
 
 	// ========== 费率配置 ==========
 	fees        map[string]map[string]interface{}
-	tradingFees map[string]*TradingFee
-	fundingFees map[string]*Currency
+	tradingFees map[string]*types.TradingFee
+	fundingFees map[string]*types.Currency
 
 	// ========== 运行时状态 ==========
 	httpClient      *http.Client
@@ -72,7 +73,7 @@ type BaseExchange struct {
 	options map[string]interface{}
 
 	// ========== 市场数据缓存 ==========
-	markets       map[string]*Market
+	markets       map[string]*types.Market
 	marketsLoaded bool
 	marketsMutex  sync.RWMutex
 
@@ -284,11 +285,11 @@ func NewBaseExchange(id, name, version string, countries []string) *BaseExchange
 		has:             make(map[string]bool),
 		timeframes:      make(map[string]string),
 		fees:            make(map[string]map[string]interface{}),
-		tradingFees:     make(map[string]*TradingFee),
-		fundingFees:     make(map[string]*Currency),
+		tradingFees:     make(map[string]*types.TradingFee),
+		fundingFees:     make(map[string]*types.Currency),
 		options:         make(map[string]interface{}),
 		httpClient:      &http.Client{Timeout: 30 * time.Second},
-		markets:         make(map[string]*Market),
+		markets:         make(map[string]*types.Market),
 		marketsLoaded:   false,
 		maxRetries:      3,
 		retryDelay:      100 * time.Millisecond,
@@ -546,21 +547,21 @@ func (b *BaseExchange) PrecisionFromString(precision string) float64 {
 
 func (b *BaseExchange) DecimalToPrecision(x float64, precision int, precisionMode, paddingMode int) string {
 	switch precisionMode {
-	case PrecisionModeDecimalPlaces:
+	case types.PrecisionModeDecimalPlaces:
 		format := fmt.Sprintf("%%.%df", precision)
 		result := fmt.Sprintf(format, x)
-		if paddingMode == PaddingModeNone {
+		if paddingMode == types.PaddingModeNone {
 			// 移除尾随零
 			result = strings.TrimRight(result, "0")
 			result = strings.TrimRight(result, ".")
 		}
 		return result
 
-	case PrecisionModeSignificantDigits:
+	case types.PrecisionModeSignificantDigits:
 		format := fmt.Sprintf("%%.%dg", precision)
 		return fmt.Sprintf(format, x)
 
-	case PrecisionModeTickSize:
+	case types.PrecisionModeTickSize:
 		if precision > 0 {
 			tickSize := math.Pow(10, -float64(precision))
 			rounded := math.Round(x/tickSize) * tickSize
@@ -604,7 +605,7 @@ func (b *BaseExchange) ExtractParams(path string) (string, map[string]interface{
 // ========== HTTP 请求方法 ==========
 
 // Request 发送HTTP请求
-func (b *BaseExchange) Request(ctx context.Context, url string, method string, headers map[string]string, body interface{}, params map[string]interface{}) (*Response, error) {
+func (b *BaseExchange) Request(ctx context.Context, url string, method string, headers map[string]string, body interface{}, params map[string]interface{}) (*types.Response, error) {
 	// 转换body为字符串
 	var bodyStr string
 	if body != nil {
@@ -638,7 +639,7 @@ func (b *BaseExchange) Request(ctx context.Context, url string, method string, h
 	}
 
 	// 转换为我们的Response类型
-	response := &Response{
+	response := &types.Response{
 		StatusCode: httpResp.StatusCode,
 		Body:       make([]byte, 0),
 		Headers:    make(map[string]string),
@@ -677,7 +678,7 @@ func (b *BaseExchange) Fetch(ctx context.Context, url, method string, headers ma
 
 // FetchWithRetry 发送带重试的HTTP请求并处理响应
 func (b *BaseExchange) FetchWithRetry(ctx context.Context, url, method string, headers map[string]string, body string) (string, error) {
-	var resp *Response
+	var resp *types.Response
 
 	err := b.RetryWithBackoff(ctx, func() error {
 		var reqErr error

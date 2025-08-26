@@ -1,12 +1,28 @@
 // 操作类型常量
 export const ACTIONS = {
-  add_position: {
+  open: {
+    title: '开仓',
+    priceLabel: '开仓价格',
+    quantityLabel: '开仓数量',
+    priceRange: { min: -50, max: 50 },
+    priceBase: 'current', // 基于当前价格
+    color: '#52c41a'
+  },
+  addition: {
     title: '加仓',
     priceLabel: '加仓价格',
     quantityLabel: '加仓数量',
-    priceRange: { min: -30, max: 30 },
+    priceRange: { min: -50, max: 50 },
     priceBase: 'current', // 基于当前价格
     color: '#52c41a'
+  },
+  close: {
+    title: '平仓',
+    priceLabel: '平仓价格',
+    quantityLabel: '平仓数量',
+    priceRange: { min: -50, max: 50 },
+    priceBase: 'entry', // 基于开仓价格
+    color: '#722ed1'
   },
   take_profit: {
     title: '止盈',
@@ -38,24 +54,26 @@ export const ORDER_STATUS_MAP = {
 
 // 操作类型颜色映射
 export const ACTION_TYPE_COLORS = {
-  'add_position': 'green',
+  'open': 'green',
+  'addition': 'green',
+  'close': 'purple',
   'take_profit': 'blue',
-  'stop_loss': 'red',
-  'open_position': 'orange'
+  'stop_loss': 'red'
 };
 
 // 操作类型文本映射
 export const ACTION_TYPE_TEXT = {
-  'add_position': '加仓',
+  'open': '开仓',
+  'addition': '加仓',
+  'close': '平仓',
   'take_profit': '止盈',
-  'stop_loss': '止损',
-  'open_position': '开仓'
+  'stop_loss': '止损'
 };
 
 // 默认配置
 export const DEFAULT_CONFIG = {
   leverage: 3,
-  marginMode: 'isolated', // 默认逐仓模式，风险更可控
+  marginMode: 'CROSS', // 默认全仓模式
   orderType: 'limit',
   refreshInterval: {
     price: 5000,      // 价格更新间隔

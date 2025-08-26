@@ -43,14 +43,14 @@ const MainLayout = ({ children, onLogout }) => {
       label: '持仓',
     },
     {
-      key: '/orders',
-      icon: <FileTextOutlined />,
-      label: '订单',
-    },
-    {
       key: '/trading-pairs',
       icon: <SwapOutlined />,
       label: '币种',
+    },
+    {
+      key: '/orders',
+      icon: <FileTextOutlined />,
+      label: '订单',
     },
     {
       key: '/klines',

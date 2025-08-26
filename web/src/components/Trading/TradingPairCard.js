@@ -1,5 +1,6 @@
 import React from 'react';
 import { Tag } from 'antd';
+import { LineChartOutlined } from '@ant-design/icons';
 
 /**
  * 交易对卡片组件
@@ -50,11 +51,35 @@ const TradingPairCard = ({
       <div className="trading-header-clean">
         <div className="trading-info-row">
           <span className="trading-symbol-clean">{symbol}</span>
-          {hasAnyEstimate(symbol) && (
-            <Tag size="small" color="blue" className="estimate-badge">
-              监听 {symbolEstimates[symbol] || ''}
-            </Tag>
-          )}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
+            {hasAnyEstimate(symbol) && (
+              <Tag size="small" color="blue" className="estimate-badge">
+                监听 {symbolEstimates[symbol] || ''}
+              </Tag>
+            )}
+            <button
+              className="control-btn primary-btn"
+              onClick={() => onAction(symbol, 'kline')}
+              title="查看K线图"
+              style={{
+                padding: '2px 6px',
+                fontSize: '12px',
+                height: '20px',
+                lineHeight: '16px',
+                borderRadius: '4px',
+                background: '#1890ff',
+                border: '1px solid #1890ff',
+                color: 'white',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '2px',
+                minWidth: '45px'
+              }}
+            >
+              <LineChartOutlined style={{ fontSize: '12px' }} />
+              K线
+            </button>
+          </div>
         </div>
       </div>
 
@@ -121,7 +146,7 @@ const TradingPairCard = ({
           )}
         </div>
         <button
-          className={`control-btn ${hasAnyPosition(symbol) ? 'secondary-btn' : 'danger-btn'} trading-control-btn`}
+          className={`control-btn ${!canDeleteSymbol(symbol) ? 'secondary-btn' : 'danger-btn'} trading-control-btn`}
           disabled={!canDeleteSymbol(symbol)}
           onClick={() => onAction(symbol, 'delete')}
           title={!canDeleteSymbol(symbol) ? getDeleteDisabledReason(symbol) : '删除交易对'}
