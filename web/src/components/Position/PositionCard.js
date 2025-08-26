@@ -3,17 +3,33 @@ import React from 'react';
 /**
  * 持仓卡片组件
  * @param {Object} position - 持仓信息
+ * @param {number} currentPrice - 实时标记价格
  * @param {Function} onAction - 操作回调 (position, action)
  * @param {Function} onViewDetails - 查看详情回调
  */
-const PositionCard = ({ position, onAction, onViewDetails }) => {
-  const isProfit = position.unrealized_pnl >= 0;
+const PositionCard = ({ position, currentPrice, onAction, onViewDetails }) => {
+  // 使用实时价格计算盈亏
+  const realTimeMarkPrice = currentPrice || position.mark_price;
+  
+  // 计算实时未实现盈亏
+  const realTimeUnrealizedPnl = (() => {
+    if (!realTimeMarkPrice || !position.entry_price || !position.size) return 0;
+    
+    const isLong = position.side === 'LONG';
+    const priceDiff = isLong 
+      ? (realTimeMarkPrice - position.entry_price)
+      : (position.entry_price - realTimeMarkPrice);
+    
+    return priceDiff * position.size;
+  })();
+  
+  const isProfit = realTimeUnrealizedPnl >= 0;
   
   // 计算保证金 = 持仓价值 / 杠杆倍数
   const margin = position.notional / position.leverage;
   
   // 计算盈亏百分比 = 未实现盈亏 / 保证金 * 100%
-  const pnlPercentage = margin > 0 ? (position.unrealized_pnl / margin * 100) : 0;
+  const pnlPercentage = margin > 0 ? (realTimeUnrealizedPnl / margin * 100) : 0;
 
   // 格式化数字显示
   const formatSize = (size) => {
@@ -50,7 +66,7 @@ const PositionCard = ({ position, onAction, onViewDetails }) => {
         </div>
         <div className={`pnl-display ${isProfit ? 'positive' : 'negative'}`}>
           <div className="pnl-amount">
-            {isProfit ? '+' : ''}{position.unrealized_pnl.toFixed(2)}
+            {isProfit ? '+' : ''}{realTimeUnrealizedPnl.toFixed(2)}
           </div>
           <div className="pnl-percentage">
             {isProfit ? '+' : ''}{pnlPercentage.toFixed(2)}%
@@ -77,7 +93,7 @@ const PositionCard = ({ position, onAction, onViewDetails }) => {
           </div>
           <div className="data-group">
             <span className="data-label">标记</span>
-            <span className="data-value">${formatPrice(position.mark_price)}</span>
+            <span className="data-value">${formatPrice(realTimeMarkPrice)}</span>
           </div>
         </div>
       </div>

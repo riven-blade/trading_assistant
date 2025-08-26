@@ -18,8 +18,8 @@ func (c *Client) SetPriceEstimate(estimate *models.PriceEstimate) error {
 	return c.rdb.Set(c.ctx, key, data, 0).Err()
 }
 
-// GetPriceEstimate 获取价格预估
-func (c *Client) GetPriceEstimate(id string) (*models.PriceEstimate, error) {
+// GetEstimateById 获取价格预估
+func (c *Client) GetEstimateById(id string) (*models.PriceEstimate, error) {
 	key := fmt.Sprintf("%s:%s", KeyPriceEstimate, id)
 	data, err := c.rdb.Get(c.ctx, key).Result()
 	if err != nil {
@@ -39,7 +39,8 @@ func (c *Client) GetActiveEstimates() ([]*models.PriceEstimate, error) {
 	}
 
 	var estimates []*models.PriceEstimate
-	for _, key := range keys {
+	for i := range keys {
+		key := keys[i]
 		data, err := c.rdb.Get(c.ctx, key).Result()
 		if err != nil {
 			continue
@@ -67,7 +68,8 @@ func (c *Client) GetEstimates() ([]*models.PriceEstimate, error) {
 	}
 
 	var estimates []*models.PriceEstimate
-	for _, key := range keys {
+	for i := range keys {
+		key := keys[i]
 		data, err := c.rdb.Get(c.ctx, key).Result()
 		if err != nil {
 			continue
@@ -86,34 +88,6 @@ func (c *Client) GetEstimates() ([]*models.PriceEstimate, error) {
 	return estimates, nil
 }
 
-// GetAvailableEstimates 获取可用的价格预估
-func (c *Client) GetAvailableEstimates() ([]*models.PriceEstimate, error) {
-	keys, err := c.rdb.Keys(c.ctx, fmt.Sprintf("%s:*", KeyPriceEstimate)).Result()
-	if err != nil {
-		return nil, err
-	}
-
-	var estimates []*models.PriceEstimate
-	for _, key := range keys {
-		data, err := c.rdb.Get(c.ctx, key).Result()
-		if err != nil {
-			continue
-		}
-
-		var estimate models.PriceEstimate
-		if err := json.Unmarshal([]byte(data), &estimate); err != nil {
-			continue
-		}
-
-		// 返回listening状态的预估
-		if estimate.Status == models.EstimateStatusListening {
-			estimates = append(estimates, &estimate)
-		}
-	}
-
-	return estimates, nil
-}
-
 // GetEstimatesBySymbol 根据交易对获取价格预估
 func (c *Client) GetEstimatesBySymbol(symbol string) ([]*models.PriceEstimate, error) {
 	keys, err := c.rdb.Keys(c.ctx, fmt.Sprintf("%s:*", KeyPriceEstimate)).Result()
@@ -122,7 +96,8 @@ func (c *Client) GetEstimatesBySymbol(symbol string) ([]*models.PriceEstimate, e
 	}
 
 	var estimates []*models.PriceEstimate
-	for _, key := range keys {
+	for i := range keys {
+		key := keys[i]
 		data, err := c.rdb.Get(c.ctx, key).Result()
 		if err != nil {
 			logrus.Errorf("获取价格预估数据失败 %s: %v", key, err)

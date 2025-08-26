@@ -150,7 +150,7 @@ const ChartPage = () => {
   const [chartInitialized, setChartInitialized] = useState(false);
 
   // 价格监听功能
-  const { getEstimatesBySymbol, hasAnyEstimate, toggleEstimate } = useEstimates();
+  const { estimates, getEstimatesBySymbol, hasAnyEstimate, toggleEstimate } = useEstimates();
   const [currentSymbolEstimates, setCurrentSymbolEstimates] = useState([]);
   const [currentSymbolPositions, setCurrentSymbolPositions] = useState([]);
   const priceLineIds = useRef(new Set()); // 跟踪已绘制的价格线
@@ -272,18 +272,19 @@ const ChartPage = () => {
     }
   }, [selectedCoin, positions]);
 
-  // 获取当前币种的价格监听数据
-  const fetchCurrentSymbolEstimates = useCallback(async () => {
+  // 获取当前币种的价格监听数据（从全局estimates数据中过滤）
+  const fetchCurrentSymbolEstimates = useCallback(() => {
     if (!selectedCoin) {
       setCurrentSymbolEstimates([]);
       return;
     }
     
     try {
-      const estimates = await getEstimatesBySymbol(selectedCoin);
+      // 从全局estimates数据中过滤当前交易对的数据
+      const symbolEstimates = getEstimatesBySymbol(selectedCoin);
       
       // 过滤掉无效的测试数据
-      const validEstimates = (estimates || []).filter(estimate => 
+      const validEstimates = (symbolEstimates || []).filter(estimate => 
         estimate.id && 
         estimate.id.length > 10 && // 确保ID不是简单的测试ID
         !estimate.id.startsWith('test-')
@@ -297,6 +298,11 @@ const ChartPage = () => {
       setCurrentSymbolEstimates([]);
     }
   }, [selectedCoin, getEstimatesBySymbol]);
+
+  // 监听全局estimates数据变化
+  useEffect(() => {
+    fetchCurrentSymbolEstimates();
+  }, [estimates, fetchCurrentSymbolEstimates]);
 
   // 手动刷新K线数据
   const handleRefresh = useCallback(async () => {
@@ -326,7 +332,7 @@ const ChartPage = () => {
       setKlineData(data);
       
       // 刷新价格监听数据
-      await fetchCurrentSymbolEstimates();
+      fetchCurrentSymbolEstimates();
       
       if (data.length === 0) {
         message.warning('暂无K线数据');
@@ -1041,7 +1047,7 @@ const ChartPage = () => {
           onToggleEstimate={async (id, enabled) => {
             const success = await toggleEstimate(id, enabled);
             if (success) {
-              await fetchCurrentSymbolEstimates();
+              fetchCurrentSymbolEstimates();
             }
           }}
           positions={currentSymbolPositions}

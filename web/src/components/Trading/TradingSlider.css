@@ -1,0 +1,44 @@
+/* 交易滑块组件样式 - 恢复默认 */
+.trading-slider-container {
+  margin-bottom: 24px;
+}
+
+.trading-slider-header {
+  margin-bottom: 8px;
+}
+
+.trading-slider-title {
+  font-weight: 500;
+}
+
+.trading-slider-wrapper {
+  margin: 8px 0;
+  padding: 0 8px;
+}
+
+.trading-slider-left-label {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+.trading-slider-display {
+  margin-top: 16px;
+  text-align: center;
+  padding: 8px 0;
+}
+
+.trading-slider-display-label {
+  display: inline;
+  font-size: 16px;
+  color: #666;
+  font-weight: 500;
+}
+
+.trading-slider-display-value {
+  display: inline;
+  font-size: 20px;
+  font-weight: 700;
+  color: #52c41a;
+  letter-spacing: 0.5px;
+}

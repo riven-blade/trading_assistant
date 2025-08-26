@@ -20,10 +20,14 @@ const PageHeader = ({ title, actions = [], extra }) => {
       <div className="page-title-clean">{title}</div>
       <Space size="middle" wrap>
         {actions.map((action, index) => (
-          <Button 
-            key={index}
-            {...action}
-          />
+          React.isValidElement(action) ? (
+            action
+          ) : (
+            <Button 
+              key={index}
+              {...action}
+            />
+          )
         ))}
         {extra}
       </Space>

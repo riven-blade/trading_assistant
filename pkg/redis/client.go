@@ -45,15 +45,17 @@ func InitRedis() error {
 // Redis键名常量
 const (
 	KeyCoin          = "coin"
+	KeyCoinSelection = "coin_selection" // 币种选择状态
 	KeyPriceEstimate = "price_estimate"
 	KeyPosition      = "position"
 	KeyOrderBook     = "orderbook"
 
-	CacheKeyKLines         = "cache:klines"          // K线缓存
-	CacheKeyBalances       = "cache:balances"        // 余额缓存
-	CacheKeyOrders         = "cache:orders"          // 订单缓存
-	CacheKeyPositions      = "cache:positions"       // 持仓缓存
-	CacheKeyFuturesSymbols = "cache:futures_symbols" // 交易对缓存
+	CacheKeyKLines           = "cache:klines"          // K线缓存
+	CacheKeyBalances         = "cache:balances"        // 余额缓存
+	CacheKeyBalancesRealtime = "realtime:balances"     // 实时余额缓存（永不过期）
+	CacheKeyOrders           = "cache:orders"          // 订单缓存
+	CacheKeyPositions        = "cache:positions"       // 持仓缓存
+	CacheKeyFuturesSymbols   = "cache:futures_symbols" // 交易对缓存
 )
 
 // Get 基础Redis操作方法

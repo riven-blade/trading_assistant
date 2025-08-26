@@ -3,75 +3,54 @@ import {
   Card, 
   Row, 
   Col, 
-  Typography, 
   Spin,
   Empty,
   Statistic,
-  Button,
-  Tag,
-  Space
+  Tag
 } from 'antd';
 import { 
-  ReloadOutlined,
   DollarOutlined,
   TrophyOutlined,
   RiseOutlined,
   FallOutlined
 } from '@ant-design/icons';
+import useAccountData from '../hooks/useAccountData';
 import api from '../services/api';
-
-const { Text } = Typography;
 
 const Balances = () => {
   const [balances, setBalances] = useState([]);
-  const [accountValue, setAccountValue] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false); // 刷新状态
-  const [accountStatus, setAccountStatus] = useState({});
+  
+  // 使用全局账户数据
+  const { 
+    accountValue, 
+    loading, 
+    lastUpdate,
+    error 
+  } = useAccountData();
 
+  // 获取资产详情数据
   useEffect(() => {
+    const fetchBalances = async () => {
+      try {
+        const response = await api.get('/monitor/balances');
+        if (response.data && response.data.data) {
+          const data = response.data.data;
+          // 新的数据结构中，余额详情在 asset_details 中
+          setBalances(data.asset_details || []);
+        }
+      } catch (error) {
+        console.error('获取余额详情失败');
+        setBalances([]);
+      }
+    };
+
     fetchBalances();
-    fetchAccountStatus();
-    // 每30秒刷新一次数据
-    const interval = setInterval(() => {
-      fetchBalances();
-      fetchAccountStatus();
-    }, 30000);
+    // 每30秒刷新一次资产详情
+    const interval = setInterval(fetchBalances, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchBalances = async () => {
-    try {
-      const response = await api.get('/monitor/balances');
-      if (response.data && response.data.data) {
-        const data = response.data.data;
-        // 新的数据结构中，余额详情在 asset_details 中
-        setBalances(data.asset_details || []);
-        // 保存账户价值信息
-        setAccountValue({
-          total_value: data.total_value || 0,
-          usdt_total: data.usdt_total || 0,
-          usdt_free: data.usdt_free || 0,
-          other_assets_value: data.other_assets_value || 0,
-          total_pnl: data.total_pnl || 0,
-          net_value: data.net_value || 0
-        });
-      }
-    } catch (error) {
-      console.error('获取余额数据失败');
-    } finally {
-      setLoading(false);
-    }
-  };
 
-  const fetchAccountStatus = async () => {
-    try {
-      const response = await api.get('/monitor/account');
-      setAccountStatus(response.data || {});
-    } catch (error) {
-      console.error('获取账户状态失败');
-    }
-  };
 
   const getAssetIcon = (asset) => {
     // 根据资产类型返回不同颜色
@@ -148,26 +127,23 @@ const Balances = () => {
         gap: '16px'
       }}>
         <div className="page-title-clean">余额资产</div>
-        <Button 
-          icon={<ReloadOutlined />} 
-          loading={refreshing}
-          onClick={async () => {
-            setRefreshing(true);
-            try {
-              await Promise.all([
-                fetchBalances(),
-                fetchAccountStatus()
-              ]);
-            } catch (error) {
-              console.error('刷新失败:', error);
-            } finally {
-              setRefreshing(false);
-            }
-          }}
-          type="primary"
-        >
-          刷新
-        </Button>
+        {lastUpdate && (
+          <div style={{ 
+            fontSize: '12px', 
+            color: '#666', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '8px' 
+          }}>
+            <div style={{ 
+              width: '8px', 
+              height: '8px', 
+              borderRadius: '50%', 
+              backgroundColor: error ? '#ff4d4f' : '#52c41a'
+            }} />
+            <span>实时更新 · {lastUpdate.toLocaleTimeString()}</span>
+          </div>
+        )}
       </div>
 
       {/* 账户概览 */}
@@ -214,7 +190,7 @@ const Balances = () => {
           <Card>
             <Statistic
               title="持仓数量"
-              value={accountStatus.positions || 0}
+              value={accountValue.positions || 0}
               valueStyle={{ color: '#1890ff' }}
               prefix={<TrophyOutlined />}
             />
@@ -223,9 +199,9 @@ const Balances = () => {
         <Col xs={24} sm={12} md={8}>
           <Card>
             <Statistic
-              title="总盈亏"
+              title="持仓盈亏明细"
               value={accountValue.total_pnl || 0}
-              precision={2}
+              precision={4}
               valueStyle={{ 
                 color: (accountValue.total_pnl || 0) >= 0 ? '#3f8600' : '#cf1322' 
               }}
@@ -241,8 +217,50 @@ const Balances = () => {
           <Card>
             <Statistic
               title="资产种类"
-              value={balances.length}
+              value={accountValue.asset_count || balances.length}
               valueStyle={{ color: '#ff7a45' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 保证金和锁定资产信息 */}
+      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+        <Col xs={24} sm={12} md={8}>
+          <Card>
+            <Statistic
+              title="已锁定USDT"
+              value={accountValue.usdt_locked || 0}
+              precision={2}
+              valueStyle={{ color: '#fa8c16' }}
+              prefix={<DollarOutlined />}
+              suffix="USDT"
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={8}>
+          <Card>
+            <Statistic
+              title="已用保证金"
+              value={accountValue.margin_used || 0}
+              precision={2}
+              valueStyle={{ color: '#eb2f96' }}
+              prefix={<DollarOutlined />}
+              suffix="USDT"
+            />
+          </Card>
+        </Col>
+        <Col xs={24} sm={12} md={8}>
+          <Card>
+            <Statistic
+              title="保证金使用率"
+              value={accountValue.margin_ratio || 0}
+              precision={1}
+              valueStyle={{ 
+                color: (accountValue.margin_ratio || 0) > 80 ? '#cf1322' : 
+                       (accountValue.margin_ratio || 0) > 60 ? '#fa8c16' : '#3f8600' 
+              }}
+              suffix="%"
             />
           </Card>
         </Col>
@@ -288,6 +306,20 @@ const Balances = () => {
                           {formatBalance(balance.amount)}
                         </div>
                         
+                        {/* 显示可用/锁定余额 */}
+                        {(balance.free || balance.locked) && (
+                          <div className="balance-breakdown">
+                            <div className="balance-free">
+                              可用: {formatBalance(balance.free || 0)}
+                            </div>
+                            {balance.locked > 0 && (
+                              <div className="balance-locked">
+                                锁定: {formatBalance(balance.locked)}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                        
                         {balance.value_usdt > 0 && (
                           <div className="balance-usdt-value">
                             ≈ ${balance.value_usdt.toFixed(2)}
@@ -321,36 +353,7 @@ const Balances = () => {
         </div>
       )}
 
-      {/* 账户状态信息 */}
-      <Card 
-        title="账户状态" 
-        style={{ marginTop: 24 }}
-        size="small"
-      >
-        <Row gutter={16}>
-          <Col xs={24} sm={8}>
-            <Text strong>WebSocket状态: </Text>
-            <Tag color={accountStatus.running ? 'green' : 'red'}>
-              {accountStatus.running ? '运行中' : '已停止'}
-            </Tag>
-          </Col>
-          <Col xs={24} sm={8}>
-            <Text strong>监控模式: </Text>
-            <Tag color="blue">{accountStatus.mode || 'unknown'}</Tag>
-          </Col>
-          <Col xs={24} sm={8}>
-            <Text strong>连接状态: </Text>
-            <Space>
-              <Tag color={accountStatus.redis_connected ? 'green' : 'red'}>
-                Redis
-              </Tag>
-              <Tag color={accountStatus.binance_connected ? 'green' : 'red'}>
-                Binance
-              </Tag>
-            </Space>
-          </Col>
-        </Row>
-      </Card>
+
     </div>
   );
 };

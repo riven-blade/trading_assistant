@@ -3,18 +3,20 @@ package apis
 import (
 	"path/filepath"
 	"trading_assistant/controllers"
+	"trading_assistant/core"
+	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/middleware"
 
 	"github.com/gin-gonic/gin"
 )
 
-func SetupRoutes(r *gin.Engine) {
+func SetupRoutes(r *gin.Engine, binanceClient *binance.Binance, marketManager *core.MarketManager) {
 	// 创建控制器实例
-	coinController := &controllers.CoinController{}
+	coinController := controllers.NewCoinController(binanceClient, marketManager)
 	priceController := &controllers.PriceController{}
-	monitorController := &controllers.MonitorController{}
+	monitorController := controllers.NewMonitorController(binanceClient)
 	authController := &controllers.AuthController{}
-	klineController := &controllers.KLineController{}
+	klineController := controllers.NewKlineController(binanceClient)
 
 	// 静态文件服务（前端构建后的文件）- 放在认证中间件之前
 	webBuildPath := "./web/build"
@@ -53,11 +55,11 @@ func SetupRoutes(r *gin.Engine) {
 		// 币种管理路由
 		coins := v1.Group("/coins")
 		{
-			coins.GET("", coinController.GetCoins)                       // 获取所有币种
-			coins.GET("/selected", coinController.GetSelectedCoins)      // 获取已筛选币种
-			coins.POST("/select", coinController.SelectCoin)             // 筛选币种
-			coins.POST("/sync", coinController.SyncCoins)                // 同步币种
-			coins.GET("/precision/:symbol", coinController.GetPrecision) // 获取币种精度信息
+			coins.GET("", coinController.GetCoins)                  // 获取所有币种
+			coins.GET("/", coinController.GetCoins)                 // 获取币种列表
+			coins.GET("/selected", coinController.GetSelectedCoins) // 获取选中的币种 - 新增
+			coins.POST("/select", coinController.SelectCoin)        // 筛选币种
+			coins.POST("/sync", coinController.SyncCoins)           // 同步币种
 		}
 
 		// 价格预估路由
@@ -69,21 +71,28 @@ func SetupRoutes(r *gin.Engine) {
 			estimates.PUT("/:id/toggle", priceController.TogglePriceEstimate) // 切换价格预估监听状态
 		}
 
+		// 价格数据路由
+		prices := v1.Group("/prices")
+		{
+			prices.GET("/selected", priceController.GetAllSelectedCoinsPrices) // 批量获取选中币种价格数据
+		}
+
 		// 监控管理路由
 		monitor := v1.Group("/monitor")
 		{
-			monitor.GET("/account", monitorController.GetAccountStatus)       // 获取账户状态
 			monitor.GET("/positions", monitorController.GetPositions)         // 获取持仓信息
 			monitor.GET("/balances", monitorController.GetBalances)           // 获取余额信息
 			monitor.GET("/orders", monitorController.GetOrders)               // 获取订单信息
-			monitor.GET("/orderbook/:symbol", monitorController.GetOrderBook) // 获取订单薄
-			monitor.POST("/refresh-cache", monitorController.RefreshCache)    // 手动刷新缓存
+			monitor.POST("/orders/cancel", monitorController.CancelOrder)     // 取消订单
+			monitor.GET("/orderbook/:symbol", monitorController.GetOrderbook) // 获取订单薄
+			monitor.GET("/websocket", monitorController.GetWebSocketStatus)   // 获取WebSocket连接状态
+
 		}
 
 		// K线分析路由
 		klines := v1.Group("/klines")
 		{
-			klines.GET("", klineController.GetKLines) // 获取K线数据
+			klines.GET("", klineController.GetKlines) // 获取K线数据
 		}
 
 	}

@@ -20,7 +20,7 @@ func (c *Client) SetPosition(position *models.Position) error {
 	if err != nil {
 		return err
 	}
-	return c.rdb.Set(c.ctx, key, data, CacheExpirationPositions).Err()
+	return c.rdb.Set(c.ctx, key, data, 0).Err() // 永不过期
 }
 
 // GetPosition 获取特定持仓信息
@@ -28,6 +28,9 @@ func (c *Client) GetPosition(symbol, side string) (*models.Position, error) {
 	key := fmt.Sprintf("%s:%s:%s", KeyPosition, symbol, side)
 	data, err := c.rdb.Get(c.ctx, key).Result()
 	if err != nil {
+		if err.Error() == "redis: nil" {
+			return nil, nil
+		}
 		return nil, err
 	}
 

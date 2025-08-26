@@ -33,18 +33,7 @@ api.interceptors.response.use(
   }
 );
 
-// 获取币种精度信息
-export const getCoinPrecision = async (symbol) => {
-  try {
-    const response = await api.get(`/coins/precision/${symbol}`);
-    return response.data.data;
-  } catch (error) {
-    console.error(`获取 ${symbol} 精度信息失败:`, error);
-    return null;
-  }
-};
-
-// 获取价格预估列表
+// 获取价格预估列表（仅监听状态）
 export const getEstimates = async (symbol = null, status = null) => {
   try {
     let url = '/estimates';
@@ -65,6 +54,26 @@ export const getEstimates = async (symbol = null, status = null) => {
   }
 };
 
+// 获取所有状态的价格预估列表（包括triggered, failed）
+export const getAllEstimates = async (symbol = null) => {
+  try {
+    let url = '/estimates/all';
+    const params = new URLSearchParams();
+    
+    if (symbol) params.append('symbol', symbol);
+    
+    if (params.toString()) {
+      url += `?${params.toString()}`;
+    }
+    
+    const response = await api.get(url);
+    return response.data.data || [];
+  } catch (error) {
+    console.error('获取所有价格预估列表失败:', error);
+    return [];
+  }
+};
+
 // 删除价格预估
 export const deleteEstimate = async (id) => {
   try {
@@ -75,6 +84,8 @@ export const deleteEstimate = async (id) => {
     throw error;
   }
 };
+
+
 
 // 切换价格监听状态
 export const toggleEstimateEnabled = async (id, enabled) => {
@@ -88,26 +99,15 @@ export const toggleEstimateEnabled = async (id, enabled) => {
   }
 };
 
-// 批量获取币种精度信息
-export const getBatchCoinPrecision = async (symbols) => {
+// 批量获取所有选中币种的价格数据
+export const getAllSelectedCoinsPrices = async () => {
   try {
-    const requests = symbols.map(symbol => getCoinPrecision(symbol));
-    const results = await Promise.all(requests);
-    
-    const precisionMap = {};
-    symbols.forEach((symbol, index) => {
-      if (results[index]) {
-        precisionMap[symbol] = results[index];
-      }
-    });
-    
-    return precisionMap;
+    const response = await api.get('/prices/selected');
+    return response.data.data || [];
   } catch (error) {
-    console.error('批量获取精度信息失败:', error);
-    return {};
+    console.error('批量获取价格数据失败:', error);
+    return [];
   }
 };
-
-
 
 export default api;

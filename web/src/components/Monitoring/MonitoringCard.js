@@ -5,26 +5,31 @@ import { ACTION_TYPE_TEXT } from '../../utils/constants';
 /**
  * 监听卡片组件
  * @param {Object} estimate - 监听数据
+ * @param {Object} currentPosition - 当前持仓信息
  * @param {Function} onDelete - 删除回调
  * @param {Function} onToggle - 监听开关回调
  */
-const MonitoringCard = ({ estimate, onDelete, onToggle }) => {
+const MonitoringCard = ({ estimate, currentPosition, onDelete, onToggle }) => {
   const actionText = ACTION_TYPE_TEXT[estimate.created_by] || estimate.created_by;
 
+  // 计算预估盈利/止损
+  const calculateEstimatedPnL = () => {
+    if (!currentPosition || !estimate.quantity || !estimate.target_price || !currentPosition.entry_price) {
+      return 0;
+    }
+
+    const isLong = currentPosition.side === 'LONG';
+    const priceDiff = isLong 
+      ? (estimate.target_price - currentPosition.entry_price)
+      : (currentPosition.entry_price - estimate.target_price);
+    
+    return priceDiff * estimate.quantity;
+  };
+
+  const estimatedPnL = calculateEstimatedPnL();
+  const isProfit = estimatedPnL >= 0;
+
   // 格式化数字显示
-  const formatNumber = (num, decimals = 2) => {
-    if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-    if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-    return num.toFixed(decimals);
-  };
-
-  const formatQuantity = (qty) => {
-    const abs = Math.abs(qty);
-    if (abs >= 1000) return formatNumber(abs, 0);
-    if (abs >= 1) return abs.toFixed(3);
-    return abs.toFixed(6);
-  };
-
   return (
     <div className="monitoring-card-clean">
       {/* 头部信息 */}
@@ -60,7 +65,10 @@ const MonitoringCard = ({ estimate, onDelete, onToggle }) => {
           <div className="price-item">
             <span className="price-label">当前</span>
             <span className="price-value current">
-              ${(estimate.current_price || 0).toFixed(4)}
+              {estimate.current_price && estimate.current_price > 0 
+                ? `$${estimate.current_price.toFixed(4)}`
+                : "加载中..."
+              }
             </span>
           </div>
           <div className="price-item">
@@ -73,13 +81,19 @@ const MonitoringCard = ({ estimate, onDelete, onToggle }) => {
 
         {/* 价格变化百分比 */}
         <div className="price-change-indicator">
-          <span className={`price-change-value ${
-            estimate.price_difference >= 0 ? 'positive' : 'negative'
-          }`}>
-            {estimate.price_difference >= 0 ? '+' : ''}{estimate.price_difference.toFixed(2)}%
-          </span>
-          {estimate.is_close_to_trigger && (
-            <span className="trigger-warning">接近触发</span>
+          {estimate.current_price && estimate.current_price > 0 ? (
+            <>
+              <span className={`price-change-value ${
+                estimate.price_difference >= 0 ? 'positive' : 'negative'
+              }`}>
+                {estimate.price_difference >= 0 ? '+' : ''}{estimate.price_difference.toFixed(2)}%
+              </span>
+              {estimate.is_close_to_trigger && (
+                <span className="trigger-warning">接近触发</span>
+              )}
+            </>
+          ) : (
+            <span className="price-change-value loading">等待价格数据...</span>
           )}
         </div>
       </div>
@@ -87,12 +101,26 @@ const MonitoringCard = ({ estimate, onDelete, onToggle }) => {
       {/* 交易详情 */}
       <div className="monitoring-details">
         <div className="detail-row">
-          <span className="detail-label">数量</span>
-          <span className="detail-value">{formatQuantity(estimate.quantity)}</span>
+          <span className="detail-label">交易数量</span>
+          <span className="detail-value">{estimate.quantity?.toFixed(6)} {estimate.symbol?.replace('USDT', '') || ''}</span>
         </div>
         <div className="detail-row">
-          <span className="detail-label">保证金</span>
-          <span className="detail-value">${estimate.usdt_amount.toFixed(2)}</span>
+          <span className="detail-label">仓位占比</span>
+          <span className="detail-value">
+            {currentPosition && currentPosition.size > 0 
+              ? `${((estimate.quantity / Math.abs(currentPosition.size)) * 100).toFixed(1)}%`
+              : 'N/A'
+            }
+          </span>
+        </div>
+        <div className="detail-row">
+          <span className="detail-label">预估盈亏</span>
+          <span className={`detail-value ${isProfit ? 'profit' : 'loss'}`}>
+            {estimatedPnL !== 0 
+              ? `${isProfit ? '+' : ''}${estimatedPnL.toFixed(2)} USDT`
+              : 'N/A'
+            }
+          </span>
         </div>
         <div className="detail-row">
           <span className="detail-label">创建时间</span>

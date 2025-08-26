@@ -1,92 +1,297 @@
 package exchanges
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
-	"github.com/sirupsen/logrus"
 )
 
-// connectMarketData 连接市场数据WebSocket
-func (bws *BinanceWebSocketManager) connectMarketData() error {
-	if bws.marketDataConn != nil {
-		bws.marketDataConn.Close()
-		bws.marketDataConn = nil
+// ========== WebSocket 基础框架 ==========
+
+type WebSocketConnection struct {
+	conn           *websocket.Conn
+	url            string
+	isConnected    bool
+	pingInterval   time.Duration // 心跳间隔，默认30秒
+	autoReconnect  bool          // 是否自动重连
+	maxReconnect   int           // 最大重连次数
+	reconnectCount int           // 当前重连次数
+	mutex          sync.RWMutex
+
+	// 处理器函数
+	messageHandler func([]byte) error // 消息处理器
+	errorHandler   func(error)        // 错误处理器
+
+	// 生命周期管理
+	ctx    context.Context
+	cancel context.CancelFunc
+}
+
+func NewWebSocketConnection(ctx context.Context, url string, maxReconnect int) (*WebSocketConnection, error) {
+	wsConn := &WebSocketConnection{
+		url:            url,
+		isConnected:    false,
+		pingInterval:   30 * time.Second,
+		autoReconnect:  maxReconnect > 0, // 只有当maxReconnect > 0时才启用自动重连
+		maxReconnect:   maxReconnect,
+		reconnectCount: 0,
 	}
 
-	// 构建WebSocket URL
-	streams := make([]string, 0, len(bws.marketDataSymbols))
-	for symbol := range bws.marketDataSymbols {
-		streams = append(streams, fmt.Sprintf("%s@depth20@100ms", symbol))
+	// 尝试连接
+	if err := wsConn.connect(ctx); err != nil {
+		return nil, err
 	}
 
-	if len(streams) == 0 {
-		return fmt.Errorf("没有交易对需要连接")
+	return wsConn, nil
+}
+
+// connect 执行实际连接
+func (ws *WebSocketConnection) connect(ctx context.Context) error {
+	dialer := websocket.Dialer{
+		HandshakeTimeout: 10 * time.Second,
 	}
 
-	baseURL := "wss://fstream.binance.com/stream"
-	if GlobalBinanceClient != nil && GlobalBinanceClient.client != nil {
-		// 检查是否是测试网
-		if GlobalBinanceClient.client.BaseURL == "https://testnet.binancefuture.com" {
-			baseURL = "wss://stream.binancefuture.com/stream"
-		}
-	}
-
-	// 构建参数
-	streamParam := ""
-	for i, stream := range streams {
-		if i > 0 {
-			streamParam += "/"
-		}
-		streamParam += stream
-	}
-
-	url := fmt.Sprintf("%s?streams=%s", baseURL, streamParam)
-	logrus.Infof("正在连接市场数据WebSocket: %s", url)
-
-	// 建立WebSocket连接
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+	conn, _, err := dialer.DialContext(ctx, ws.url, nil)
 	if err != nil {
-		return fmt.Errorf("WebSocket连接失败: %v", err)
+		connErr := fmt.Errorf("failed to connect to %s: %w", ws.url, err)
+		if ws.errorHandler != nil {
+			ws.errorHandler(connErr)
+		}
+		return connErr
 	}
 
-	bws.marketDataConn = conn
-	bws.marketDataLastPong = time.Now()
+	wsCtx, cancel := context.WithCancel(ctx)
 
-	logrus.Infof("市场数据WebSocket连接成功，订阅了 %d 个交易对", len(streams))
+	ws.mutex.Lock()
+	ws.conn = conn
+	ws.isConnected = true
+	ws.ctx = wsCtx
+	ws.cancel = cancel
+	ws.mutex.Unlock()
+
+	// 启动协程
+	go ws.messageLoop()
+	go ws.pingLoop()
+
 	return nil
 }
 
-// reconnectMarketData 重新连接市场数据流
-func (bws *BinanceWebSocketManager) reconnectMarketData() error {
-	bws.marketDataReconnectAttempts++
-	delay := time.Duration(bws.marketDataReconnectAttempts) * 2 * time.Second
-	if delay > 60*time.Second {
-		delay = 60 * time.Second
+// reconnect 重连逻辑
+func (ws *WebSocketConnection) reconnect() {
+	if !ws.autoReconnect || ws.reconnectCount >= ws.maxReconnect {
+		if ws.errorHandler != nil {
+			ws.errorHandler(fmt.Errorf("max reconnect attempts reached (%d), giving up", ws.maxReconnect))
+		}
+		return
 	}
 
-	logrus.Warnf("市场数据WebSocket重连中... (第%d次尝试，延迟%v)",
-		bws.marketDataReconnectAttempts, delay)
-	time.Sleep(delay)
+	ws.reconnectCount++
 
-	if err := bws.connectMarketData(); err != nil {
+	// 指数退避：2^attempt * 1秒，最大30秒
+	backoff := time.Duration(1<<uint(ws.reconnectCount)) * time.Second
+	if backoff > 30*time.Second {
+		backoff = 30 * time.Second
+	}
+
+	time.Sleep(backoff)
+
+	if err := ws.connect(ws.ctx); err != nil {
+		if ws.errorHandler != nil {
+			ws.errorHandler(fmt.Errorf("reconnect attempt %d/%d failed: %w",
+				ws.reconnectCount, ws.maxReconnect, err))
+		}
+		go ws.reconnect() // 继续重连
+	} else {
+		ws.reconnectCount = 0 // 重连成功，重置计数
+	}
+}
+
+// messageLoop 消息处理循环
+func (ws *WebSocketConnection) messageLoop() {
+	defer func() {
+		ws.mutex.Lock()
+		ws.isConnected = false
+		if ws.conn != nil {
+			ws.conn.Close()
+		}
+		ws.mutex.Unlock()
+
+		// 如果启用重连，则尝试重连
+		if ws.autoReconnect && ws.reconnectCount < ws.maxReconnect {
+			go ws.reconnect()
+		}
+	}()
+
+	for {
+		select {
+		case <-ws.ctx.Done():
+			return
+		default:
+			_, message, err := ws.conn.ReadMessage()
+			if err != nil {
+				if ws.errorHandler != nil {
+					ws.errorHandler(err)
+				}
+				return
+			}
+
+			if ws.messageHandler != nil {
+				if err := ws.messageHandler(message); err != nil && ws.errorHandler != nil {
+					ws.errorHandler(err)
+				}
+			}
+		}
+	}
+}
+
+// SetHandler 设置消息处理器
+func (ws *WebSocketConnection) SetHandler(handler func([]byte) error) {
+	ws.messageHandler = handler
+}
+
+// SetErrorHandler 设置错误处理器
+func (ws *WebSocketConnection) SetErrorHandler(handler func(error)) {
+	ws.errorHandler = handler
+}
+
+// ========== 便利方法 ==========
+
+// IsConnected 检查连接状态
+func (ws *WebSocketConnection) IsConnected() bool {
+	ws.mutex.RLock()
+	defer ws.mutex.RUnlock()
+	return ws.isConnected
+}
+
+// GetURL 获取连接URL
+func (ws *WebSocketConnection) GetURL() string {
+	return ws.url
+}
+
+// GetReconnectCount 获取重连次数
+func (ws *WebSocketConnection) GetReconnectCount() int {
+	ws.mutex.RLock()
+	defer ws.mutex.RUnlock()
+	return ws.reconnectCount
+}
+
+// SetPingInterval 设置心跳间隔
+func (ws *WebSocketConnection) SetPingInterval(interval time.Duration) {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+	ws.pingInterval = interval
+}
+
+// SendRawMessage 发送原始字节消息
+func (ws *WebSocketConnection) SendRawMessage(data []byte) error {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+
+	if !ws.isConnected {
+		err := fmt.Errorf("connection not established")
+		if ws.errorHandler != nil {
+			ws.errorHandler(err)
+		}
 		return err
 	}
 
-	bws.marketDataReconnectAttempts = 0
+	if err := ws.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		if ws.errorHandler != nil {
+			ws.errorHandler(fmt.Errorf("failed to send raw message: %w", err))
+		}
+		return err
+	}
+
 	return nil
 }
 
-// isMarketDataConnected 检查市场数据连接状态
-func (bws *BinanceWebSocketManager) isMarketDataConnected() bool {
-	bws.marketDataMu.RLock()
-	defer bws.marketDataMu.RUnlock()
+// pingLoop ping保活循环
+func (ws *WebSocketConnection) pingLoop() {
+	ticker := time.NewTicker(ws.pingInterval)
+	defer ticker.Stop()
 
-	if bws.marketDataConn == nil {
-		return false
+	for {
+		select {
+		case <-ws.ctx.Done():
+			return
+		case <-ticker.C:
+			ws.mutex.Lock()
+			if ws.isConnected {
+				if err := ws.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+					if ws.errorHandler != nil {
+						ws.errorHandler(fmt.Errorf("ping failed: %w", err))
+					}
+					// Ping失败可能意味着连接有问题，标记为断开
+					ws.isConnected = false
+					if ws.conn != nil {
+						ws.conn.Close()
+					}
+					ws.mutex.Unlock()
+					// 触发重连
+					if ws.autoReconnect && ws.reconnectCount < ws.maxReconnect {
+						go ws.reconnect()
+					}
+					return
+				}
+			}
+			ws.mutex.Unlock()
+		}
+	}
+}
+
+// SendMessage 发送消息
+func (ws *WebSocketConnection) SendMessage(msg interface{}) error {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+
+	if !ws.isConnected {
+		err := fmt.Errorf("connection not established")
+		if ws.errorHandler != nil {
+			ws.errorHandler(err)
+		}
+		return err
 	}
 
-	// 检查是否超过心跳超时时间
-	return time.Since(bws.marketDataLastPong) < 35*time.Second
+	data, err := json.Marshal(msg)
+	if err != nil {
+		if ws.errorHandler != nil {
+			ws.errorHandler(fmt.Errorf("failed to marshal message: %w", err))
+		}
+		return err
+	}
+
+	if err := ws.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+		if ws.errorHandler != nil {
+			ws.errorHandler(fmt.Errorf("failed to send message: %w", err))
+		}
+		return err
+	}
+
+	return nil
+}
+
+// Close 关闭连接
+func (ws *WebSocketConnection) Close() error {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+
+	ws.isConnected = false
+	if ws.cancel != nil {
+		ws.cancel()
+	}
+
+	if ws.conn != nil {
+		if err := ws.conn.Close(); err != nil {
+			if ws.errorHandler != nil {
+				ws.errorHandler(fmt.Errorf("failed to close connection: %w", err))
+			}
+			return err
+		}
+	}
+
+	return nil
 }

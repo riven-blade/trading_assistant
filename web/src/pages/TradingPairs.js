@@ -1,8 +1,5 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
-  Row, 
-  Col, 
-  Button, 
   Drawer, 
   Input, 
   Typography, 
@@ -13,25 +10,22 @@ import {
   Tag,
   Select,
   Table,
+  Row,
+  Col,
 } from 'antd';
 import { 
   PlusOutlined, 
   ReloadOutlined
 } from '@ant-design/icons';
-import api, { getBatchCoinPrecision } from '../services/api';
-import { 
-  validatePriceComplete, 
-  validateQuantityComplete, 
-  autoFixPriceAndQuantity,
-  formatPrice
-} from '../utils/precision';
+import api from '../services/api';
 
 // 通用组件和Hooks
 import PageHeader from '../components/Common/PageHeader';
-import TradingPairCard from '../components/Trading/TradingPairCard';
 import TradeDrawer from '../components/Trading/TradeDrawer';
+import TradingPairCard from '../components/Trading/TradingPairCard';
 import useAccountData from '../hooks/useAccountData';
 import useEstimates from '../hooks/useEstimates';
+import usePriceData from '../hooks/usePriceData';
 import { DEFAULT_CONFIG } from '../utils/constants';
 
 const { Text } = Typography;
@@ -45,7 +39,6 @@ const TradingPairs = () => {
   // 基础状态
   const [selectedPairs, setSelectedPairs] = useState([]);
   const [allPairs, setAllPairs] = useState([]);
-  const [priceData, setPriceData] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false); // 刷新状态
   const [drawerVisible, setDrawerVisible] = useState(false);
@@ -62,7 +55,6 @@ const TradingPairs = () => {
   const [syncing, setSyncing] = useState(false);
   const [searchValue, setSearchValue] = useState('');
   const [filteredPairs, setFilteredPairs] = useState([]);
-  const [precisionInfo, setPrecisionInfo] = useState({});
   
   // 排序相关状态
   const [sortBy, setSortBy] = useState('price_change_percent'); // 排序字段
@@ -75,15 +67,17 @@ const TradingPairs = () => {
   const [selectedLeverage, setSelectedLeverage] = useState(DEFAULT_CONFIG.leverage);
   const [targetPrice, setTargetPrice] = useState(0);
   const [orderType, setOrderType] = useState(DEFAULT_CONFIG.orderType);
-  const [usdtAmount, setUsdtAmount] = useState(10);
-  const [coinQuantity, setCoinQuantity] = useState(0);
+  const [quantity, setQuantity] = useState(0.001);
+  const [marginMode, setMarginMode] = useState('isolated'); // 默认逐仓模式
 
   // 使用自定义Hooks
   const { 
     accountValue, 
-    positionsMap, 
     hasPosition, 
-    hasAnyPosition
+    hasAnyPosition,
+    positionCount,
+    lastUpdate: accountLastUpdate,
+    error: accountError
   } = useAccountData();
 
   const { 
@@ -91,6 +85,17 @@ const TradingPairs = () => {
     hasAnyEstimate,
     fetchSymbolEstimates 
   } = useEstimates();
+
+  // 使用全局价格数据管理
+  const { 
+    priceData, 
+    loading: priceLoading,
+    lastUpdate: priceLastUpdate,
+    refreshPriceData,
+    getPriceBySymbol,
+    priceCount,
+    validPriceCount
+  } = usePriceData();
 
   // 初始化
   useEffect(() => {
@@ -165,13 +170,6 @@ const TradingPairs = () => {
       const response = await api.get('/coins/selected');
       const pairs = response.data.data || [];
       setSelectedPairs(pairs);
-      
-      // 获取精度信息
-      if (pairs.length > 0) {
-        const symbols = pairs.map(pair => pair.symbol);
-        const precision = await getBatchCoinPrecision(symbols);
-        setPrecisionInfo(precision);
-      }
     } catch (error) {
       message.error('获取选中交易对失败');
     } finally {
@@ -188,77 +186,7 @@ const TradingPairs = () => {
     }
   };
 
-  // 获取价格数据
-  const fetchPriceData = useCallback(async () => {
-    if (selectedPairs.length === 0) return;
 
-    try {
-      const pricePromises = selectedPairs.map(async (pair) => {
-        try {
-          const response = await api.get(`/monitor/orderbook/${pair.symbol}`);
-          return {
-            symbol: pair.symbol,
-            orderbook: response.data.data
-          };
-        } catch (error) {
-          console.error(`获取 ${pair.symbol} 订单薄失败:`, error);
-          return {
-            symbol: pair.symbol,
-            orderbook: null
-          };
-        }
-      });
-
-      const results = await Promise.all(pricePromises);
-      const newPriceData = {};
-      
-      results.forEach(result => {
-        if (result) {
-          const { symbol, orderbook } = result;
-          
-          let bestBid = 0;
-          let bestAsk = 0;
-          let midPrice = 0;
-          let hasValidData = false;
-          
-          if (orderbook && orderbook.bids && orderbook.asks) {
-            if (orderbook.bids.length > 0 && orderbook.asks.length > 0) {
-              bestBid = parseFloat(orderbook.bids[0].price);
-              bestAsk = parseFloat(orderbook.asks[0].price);
-              if (bestBid > 0 && bestAsk > 0) {
-                midPrice = (bestBid + bestAsk) / 2;
-                hasValidData = true;
-              }
-            }
-          }
-          
-          if (hasValidData) {
-            newPriceData[symbol] = {
-              currentPrice: midPrice,
-              bestBid,
-              bestAsk,
-              lastUpdate: new Date(),
-              orderbook: orderbook,
-              hasValidData: hasValidData
-            };
-          }
-        }
-      });
-      
-      setPriceData(prev => ({ ...prev, ...newPriceData }));
-    } catch (error) {
-      console.error('批量获取价格数据失败:', error);
-    }
-  }, [selectedPairs]);
-
-  // 定期更新价格数据
-  useEffect(() => {
-    if (selectedPairs.length > 0) {
-      fetchPriceData();
-      const interval = setInterval(fetchPriceData, DEFAULT_CONFIG.refreshInterval.price);
-      return () => clearInterval(interval);
-    }
-  }, [selectedPairs, fetchPriceData]);
 
   // 同步交易对
   const syncPairs = async () => {
@@ -283,7 +211,7 @@ const TradingPairs = () => {
       });
       message.success(`${symbol} 添加成功`);
       await fetchSelectedPairs();
-      setTimeout(fetchPriceData, 1000);
+      // 价格数据会自动更新，无需手动刷新
       setDrawerVisible(false);
     } catch (error) {
       message.error(`${symbol} 添加失败`);
@@ -356,232 +284,82 @@ const TradingPairs = () => {
     }
     setTargetPrice(initialPrice);
     
-    // 计算初始币数量
-    const defaultUsdtAmount = Math.min(getMaxUsdtAmount() * 0.2, 100);
-    const initialQuantity = calculateCoinQuantity(defaultUsdtAmount, initialPrice, DEFAULT_CONFIG.leverage);
-    setCoinQuantity(initialQuantity);
-    setUsdtAmount(defaultUsdtAmount);
+    // 计算默认开仓数量
+    const defaultQuantity = getDefaultQuantity(symbol, initialPrice);
+    setQuantity(defaultQuantity);
     
     // 重置状态到默认值
     setSelectedLeverage(DEFAULT_CONFIG.leverage);
     setOrderType(DEFAULT_CONFIG.orderType);
-    setTargetPrice(initialPrice);
+    setMarginMode('isolated');
     
     setTradeModalVisible(true);
   };
 
-  // 计算相关函数
-  const calculateCoinQuantity = (usdtAmount, price, leverage) => {
-    if (price > 0 && leverage > 0) {
-      const quantity = (usdtAmount * leverage) / price;
-      return parseFloat(quantity.toFixed(6));
-    }
-    return 0;
-  };
-
-  const calculateUsdtAmount = (coinQuantity, price, leverage) => {
-    if (price > 0 && leverage > 0) {
-      const usdt = (coinQuantity * price) / leverage;
-      return parseFloat(usdt.toFixed(2));
-    }
-    return 0;
-  };
-
-  const getMaxUsdtAmount = () => {
-    return Math.floor(accountValue.usdt_free * 0.5);
-  };
-
-  const getMaxCoinQuantity = () => {
-    const currentPrice = getCurrentPrice();
-    const maxUsdtAmount = getMaxUsdtAmount();
-    
-    if (currentPrice > 0 && maxUsdtAmount > 0 && selectedLeverage > 0) {
-      const maxQuantity = (maxUsdtAmount * selectedLeverage) / currentPrice;
-      return parseFloat(maxQuantity.toFixed(6));
-    }
-    return 1000;
+  // 计算默认开仓数量
+  const getDefaultQuantity = (symbol, price) => {
+    if (!price || !accountValue?.usdt_free) return 0.001;
+    const maxUsdtAmount = accountValue.usdt_free * 0.2; // 使用20%的可用余额作为默认
+    const defaultQuantity = (maxUsdtAmount * selectedLeverage) / price;
+    return Math.max(0.001, parseFloat(defaultQuantity.toFixed(6)));
   };
 
   const getCurrentPrice = () => {
-    if (orderType === 'market') {
-      return priceData[selectedTradeSymbol]?.currentPrice || 0;
-    } else {
-      return targetPrice || priceData[selectedTradeSymbol]?.currentPrice || 0;
+    const price = getPriceBySymbol(selectedTradeSymbol);
+    return price?.markPrice || price?.currentPrice || 0;
+  };
+
+  // 统一的卡片操作处理
+  const handleCardAction = (symbol, action) => {
+    switch (action) {
+      case 'long':
+        openTradeModal(symbol, 'long');
+        break;
+      case 'short':
+        openTradeModal(symbol, 'short');
+        break;
+      case 'delete':
+        removePair(symbol);
+        break;
+      default:
+        break;
     }
   };
 
-  const getPriceRange = () => {
-    const currentPrice = priceData[selectedTradeSymbol];
-    if (!currentPrice?.hasValidData) return [0, 1000];
-    
-    const basePrice = currentPrice.currentPrice;
-    const minPrice = basePrice * 0.8; // -20%
-    const maxPrice = basePrice * 1.2; // +20%
-    return [minPrice, maxPrice];
-  };
-
-  const calculateUsdtRatio = () => {
-    const maxAmount = getMaxUsdtAmount();
-    return maxAmount > 0 ? (usdtAmount / maxAmount) * 100 : 0;
-  };
-
-  // 处理函数
+  // 简化的处理函数
   const handlePriceChange = (value) => {
-    const coinInfo = precisionInfo[selectedTradeSymbol];
-    let finalPrice = value || 0;
-    
-    if (coinInfo && value) {
-      const { price: adjustedPrice } = autoFixPriceAndQuantity(value, 0, coinInfo);
-      finalPrice = adjustedPrice;
-      
-      if (Math.abs(adjustedPrice - value) > 1e-8) {
-        message.info(`价格已自动调整为符合精度要求的 ${formatPrice(adjustedPrice, coinInfo.price_precision)}`);
-      }
-    }
-    
-    setTargetPrice(finalPrice);
-    
-    // 重新计算币数量和USDT金额
-    const currentPrice = getCurrentPrice();
-    if (currentPrice > 0) {
-      const newMaxQuantity = getMaxCoinQuantity();
-      let newCoinQuantity = coinQuantity;
-      
-      if (coinQuantity > newMaxQuantity) {
-        newCoinQuantity = newMaxQuantity;
-        setCoinQuantity(newCoinQuantity);
-      }
-      
-      const usdt = calculateUsdtAmount(newCoinQuantity, currentPrice, selectedLeverage);
-      setUsdtAmount(usdt);
-    }
-  };
-
-  const handleQuantityChange = (value) => {
-    let finalQuantity = value;
-    
-    if (precisionInfo[selectedTradeSymbol]) {
-      const { quantity: adjustedQuantity } = autoFixPriceAndQuantity(0, value, precisionInfo[selectedTradeSymbol]);
-      finalQuantity = adjustedQuantity;
-    }
-    
-    setCoinQuantity(finalQuantity);
-    
-    const currentPrice = getCurrentPrice();
-    if (currentPrice > 0) {
-      const usdt = calculateUsdtAmount(finalQuantity, currentPrice, selectedLeverage);
-      setUsdtAmount(usdt);
-      // USDT金额已通过setUsdtAmount更新
-    }
-  };
-
-  const handleSliderChange = (value) => {
-    let finalPrice = value;
-    
-    if (precisionInfo[selectedTradeSymbol]) {
-      const { price: adjustedPrice } = autoFixPriceAndQuantity(value, 0, precisionInfo[selectedTradeSymbol]);
-      finalPrice = adjustedPrice;
-    }
-    
-    setTargetPrice(finalPrice);
-    // 目标价格已通过setState更新
-    
-    // 重新计算相关数值
-    const currentPrice = getCurrentPrice();
-    if (currentPrice > 0) {
-      const newMaxQuantity = getMaxCoinQuantity();
-      let newCoinQuantity = coinQuantity;
-      
-      if (coinQuantity > newMaxQuantity) {
-        newCoinQuantity = newMaxQuantity;
-        setCoinQuantity(newCoinQuantity);
-      }
-      
-      const usdt = calculateUsdtAmount(newCoinQuantity, currentPrice, selectedLeverage);
-      setUsdtAmount(usdt);
-      // USDT金额已通过setUsdtAmount更新
-    }
+    setTargetPrice(value || 0);
   };
 
   const handleLeverageChange = (value) => {
     setSelectedLeverage(value);
-    const currentPrice = getCurrentPrice();
-    if (currentPrice > 0) {
-      const newMaxQuantity = getMaxCoinQuantity();
-      let newCoinQuantity = coinQuantity;
-      
-      if (coinQuantity > newMaxQuantity) {
-        newCoinQuantity = newMaxQuantity;
-        setCoinQuantity(newCoinQuantity);
-      }
-      
-      const usdt = calculateUsdtAmount(newCoinQuantity, currentPrice, value);
-      setUsdtAmount(usdt);
-    }
   };
 
   const handleOrderTypeChange = (value) => {
     setOrderType(value);
-    const currentPrice = getCurrentPrice();
-    if (currentPrice > 0) {
-      const newMaxQuantity = getMaxCoinQuantity();
-      let newCoinQuantity = coinQuantity;
-      
-      if (coinQuantity > newMaxQuantity) {
-        newCoinQuantity = newMaxQuantity;
-        setCoinQuantity(newCoinQuantity);
-      }
-      
-      const usdt = calculateUsdtAmount(newCoinQuantity, currentPrice, selectedLeverage);
-      setUsdtAmount(usdt);
-    }
   };
 
   // 创建交易
-  const createTrade = async (values) => {
+  const createTrade = async () => {
     try {
-      const price = priceData[selectedTradeSymbol];
-      if (!price?.hasValidData) {
+      const currentPrice = getCurrentPrice();
+      if (!currentPrice || currentPrice <= 0) {
         message.error('价格数据不可用，请稍后再试');
         return;
       }
 
-      const coinInfo = precisionInfo[selectedTradeSymbol];
-      
-      // 根据订单类型确定价格
-      let orderPrice;
-      if (values.orderType === 'market') {
-        orderPrice = tradeSide === 'long' ? price.bestAsk : price.bestBid;
-      } else {
-        orderPrice = targetPrice;
-        if (!orderPrice || orderPrice <= 0) {
-          message.error('请设置有效的限价价格');
-          return;
-        }
-        
-        if (coinInfo) {
-          const priceValidation = validatePriceComplete(orderPrice, coinInfo);
-          if (!priceValidation.valid) {
-            message.error(`价格精度错误: ${priceValidation.error}`);
-            return;
-          }
-        }
-      }
-
-      if (!coinQuantity || coinQuantity <= 0) {
-        message.error('币数量计算异常，请重新操作');
+      // 检查开仓数量
+      if (!quantity || quantity <= 0) {
+        message.error('请设置有效的开仓数量');
         return;
       }
       
-      // 在提交前再次修正精度，确保完全符合要求
-      let finalQuantity = coinQuantity;
-      if (coinInfo) {
-        const { quantity: adjustedQuantity } = autoFixPriceAndQuantity(0, coinQuantity, coinInfo);
-        finalQuantity = adjustedQuantity;
-        
-        const quantityValidation = validateQuantityComplete(finalQuantity, coinInfo);
-        if (!quantityValidation.valid) {
-          message.error(`数量精度错误: ${quantityValidation.error}`);
+      // 根据订单类型确定价格
+      let orderPrice = currentPrice;
+      if (orderType === 'limit') {
+        orderPrice = targetPrice || currentPrice;
+        if (!orderPrice || orderPrice <= 0) {
+          message.error('请设置有效的限价价格');
           return;
         }
       }
@@ -591,10 +369,10 @@ const TradingPairs = () => {
         side: tradeSide,
         action_type: 'open',
         target_price: orderPrice,
-        quantity: finalQuantity,
-        leverage: values.leverage,
-        margin_mode: values.marginMode || 'isolated',
-        order_type: values.orderType,
+        quantity: quantity,
+        leverage: selectedLeverage,
+        margin_mode: marginMode,
+        order_type: orderType,
         trigger_type: 'condition',
         created_by: 'open_position'
       };
@@ -602,9 +380,11 @@ const TradingPairs = () => {
       await api.post('/estimates', orderData);
       
       const actionText = tradeSide === 'long' ? '开多' : '开空';
-      const orderTypeText = values.orderType === 'market' ? '市价' : '限价';
+      const orderTypeText = orderType === 'market' ? '市价' : '限价';
       
-      message.success(`${actionText}预估价已创建 | ${orderTypeText}单 ${values.leverage}x杠杆 ${usdtAmount} USDT`);
+      const baseAsset = selectedTradeSymbol.replace('USDT', '');
+      const marginModeText = marginMode === 'cross' ? '全仓' : '逐仓';
+      message.success(`${actionText}预估价已创建 | ${orderTypeText}单 ${selectedLeverage}x杠杆 ${marginModeText} ${quantity} ${baseAsset}`);
       setTradeModalVisible(false);
       fetchSymbolEstimates();
     } catch (error) {
@@ -614,28 +394,33 @@ const TradingPairs = () => {
 
   // 页面操作配置
   const headerActions = [
-    {
-      icon: <ReloadOutlined />,
-      loading: refreshing,
-      onClick: async () => {
+    <button 
+      key="refresh"
+      className="control-btn primary-btn trading-pairs-header-btn"
+      onClick={async () => {
         setRefreshing(true);
         try {
           await fetchSelectedPairs();
-          setTimeout(() => fetchPriceData(), 500);
+          refreshPriceData();
         } catch (error) {
           console.error('刷新失败:', error);
         } finally {
           setRefreshing(false);
         }
-      },
-      children: '刷新'
-    },
-    {
-      icon: <PlusOutlined />,
-      type: 'primary',
-      onClick: () => setDrawerVisible(true),
-      children: '添加交易对'
-    }
+      }}
+      disabled={refreshing}
+    >
+      <ReloadOutlined style={{ marginRight: 4 }} />
+      刷新
+    </button>,
+    <button 
+      key="add"
+      className="control-btn success-btn trading-pairs-header-btn"
+      onClick={() => setDrawerVisible(true)}
+    >
+      <PlusOutlined style={{ marginRight: 4 }} />
+      添加交易对
+    </button>
   ];
 
   if (loading) {
@@ -660,18 +445,25 @@ const TradingPairs = () => {
       ) : (
         <Row gutter={[16, 16]}>
           {selectedPairs.map((pair) => (
-            <Col xs={24} sm={12} md={8} lg={6} xl={4} key={pair.symbol}>
+            <Col 
+              xs={12} 
+              sm={12} 
+              md={8} 
+              lg={6} 
+              xl={4} 
+              key={pair.symbol}
+            >
               <TradingPairCard
                 pair={pair}
-                priceData={priceData}
-                positions={positionsMap}
-                symbolEstimates={symbolEstimates}
-                onDelete={removePair}
-                onTrade={openTradeModal}
+                priceInfo={getPriceBySymbol(pair.symbol)}
+                onAction={handleCardAction}
                 hasPosition={hasPosition}
+                hasAnyPosition={hasAnyPosition}
+                hasAnyEstimate={hasAnyEstimate}
+                symbolEstimates={symbolEstimates}
                 canDeleteSymbol={canDeleteSymbol}
                 getDeleteDisabledReason={getDeleteDisabledReason}
-                hasAnyEstimate={hasAnyEstimate}
+                isMobile={isMobile}
               />
             </Col>
           ))}
@@ -703,21 +495,23 @@ const TradingPairs = () => {
           borderBottom: '1px solid #f0f0f0'
         }}>
           {/* 同步按钮 */}
-          <Button 
-            icon={<ReloadOutlined />} 
+          <button 
+            className="control-btn primary-btn trading-pairs-header-btn"
             onClick={syncPairs}
-            loading={syncing}
-            type="dashed"
-            size="small"
-            block
+            disabled={syncing}
             style={{ 
               marginBottom: '8px',
               height: '32px',
-              fontSize: isMobile ? '12px' : '13px'
+              fontSize: isMobile ? '12px' : '13px',
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
             }}
           >
+            <ReloadOutlined style={{ marginRight: 4 }} />
             从交易所同步最新交易对
-          </Button>
+          </button>
           
           {/* 搜索框 - 统一样式 */}
           <Input.Search
@@ -901,9 +695,8 @@ const TradingPairs = () => {
                       已选
                     </Tag>
                   ) : (
-                    <Button 
-                      type="primary" 
-                      size="small"
+                    <button 
+                      className="control-btn success-btn trading-pairs-action-btn"
                       onClick={() => addPair(record.symbol)}
                       style={{ 
                         fontSize: isMobile ? '10px' : '12px',
@@ -911,7 +704,7 @@ const TradingPairs = () => {
                       }}
                     >
                       添加
-                    </Button>
+                    </button>
                   )
               }
             ]}
@@ -933,33 +726,83 @@ const TradingPairs = () => {
         visible={tradeModalVisible}
         onClose={() => {
           setTradeModalVisible(false);
-          setTimeout(() => {
-            if (selectedPairs.length > 0) {
-              fetchPriceData();
-            }
-          }, 100);
+          // 价格数据会自动更新，无需手动刷新
         }}
         symbol={selectedTradeSymbol}
         side={tradeSide}
-
         onSubmit={createTrade}
         priceData={priceData}
-        precisionInfo={precisionInfo}
         accountValue={accountValue}
         targetPrice={targetPrice}
         onPriceChange={handlePriceChange}
-        coinQuantity={coinQuantity}
-        onQuantityChange={handleQuantityChange}
-        usdtAmount={usdtAmount}
+        quantity={quantity}
+        onQuantityChange={setQuantity}
         orderType={orderType}
         onOrderTypeChange={handleOrderTypeChange}
         selectedLeverage={selectedLeverage}
         onLeverageChange={handleLeverageChange}
-        getMaxCoinQuantity={getMaxCoinQuantity}
-        getPriceRange={getPriceRange}
-        handleSliderChange={handleSliderChange}
-        calculateUsdtRatio={calculateUsdtRatio}
+        marginMode={marginMode}
+        onMarginModeChange={setMarginMode}
       />
+      
+      {/* 全局状态显示 */}
+      <div style={{ 
+        position: 'fixed', 
+        bottom: '20px', 
+        right: '20px', 
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '8px',
+        zIndex: 1000
+      }}>
+        {/* 价格数据状态 */}
+        <div style={{ 
+          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+          color: 'white', 
+          padding: '8px 12px', 
+          borderRadius: '6px', 
+          fontSize: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}>
+          <div style={{ 
+            width: '8px', 
+            height: '8px', 
+            borderRadius: '50%', 
+            backgroundColor: priceLoading ? '#ffa500' : (validPriceCount > 0 ? '#52c41a' : '#ff4d4f')
+          }} />
+          <span>
+            价格: {validPriceCount}/{priceCount} 
+            {priceLastUpdate && ` · ${priceLastUpdate.toLocaleTimeString()}`}
+          </span>
+        </div>
+        
+        {/* 账户数据状态 */}
+        <div style={{ 
+          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
+          color: 'white', 
+          padding: '8px 12px', 
+          borderRadius: '6px', 
+          fontSize: '12px',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
+        }}>
+          <div style={{ 
+            width: '8px', 
+            height: '8px', 
+            borderRadius: '50%', 
+            backgroundColor: accountError ? '#ff4d4f' : (accountValue ? '#52c41a' : '#ffa500')
+          }} />
+          <span>
+            账户: {positionCount}仓位 
+            {accountLastUpdate && ` · ${accountLastUpdate.toLocaleTimeString()}`}
+          </span>
+        </div>
+      </div>
     </div>
   );
 };

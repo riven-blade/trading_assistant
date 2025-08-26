@@ -1,87 +1,135 @@
 import React from 'react';
-import PriceDisplay from '../Common/PriceDisplay';
+import { Tag } from 'antd';
 
 /**
  * 交易对卡片组件
  * @param {Object} pair - 交易对信息
- * @param {Object} priceData - 价格数据
- * @param {Object} positions - 持仓信息
- * @param {Object} symbolEstimates - 监听统计
- * @param {Function} onDelete - 删除回调
- * @param {Function} onTrade - 交易回调
- * @param {Function} hasPosition - 检查仓位函数
- * @param {Function} canDeleteSymbol - 检查是否可删除函数
- * @param {Function} getDeleteDisabledReason - 获取删除禁用原因函数
- * @param {Function} hasAnyEstimate - 检查是否有监听函数
+ * @param {Object} priceInfo - 价格信息
+ * @param {Function} onAction - 操作回调 (symbol, action)
+ * @param {Function} hasPosition - 检查是否有仓位
+ * @param {Function} hasAnyPosition - 检查是否有任意仓位
+ * @param {Function} hasAnyEstimate - 检查是否有监听
+ * @param {Object} symbolEstimates - 监听数量映射
+ * @param {Function} canDeleteSymbol - 检查是否可删除
+ * @param {Function} getDeleteDisabledReason - 获取删除禁用原因
+ * @param {boolean} isMobile - 是否为移动端
  */
-const TradingPairCard = ({
-  pair,
-  priceData,
-  positions,
-  symbolEstimates,
-  onDelete,
-  onTrade,
+const TradingPairCard = ({ 
+  pair, 
+  priceInfo, 
+  onAction, 
   hasPosition,
+  hasAnyPosition,
+  hasAnyEstimate,
+  symbolEstimates,
   canDeleteSymbol,
   getDeleteDisabledReason,
-  hasAnyEstimate
+  isMobile = false
 }) => {
-  const price = priceData[pair.symbol];
+  const symbol = pair.symbol;
+  const hasValidPrice = priceInfo && priceInfo.hasValidData;
+  
+  // 格式化价格显示
+  const formatPrice = (price) => {
+    if (!price) return 'N/A';
+    if (price >= 1000) return price.toFixed(2);
+    if (price >= 1) return price.toFixed(4);
+    return price.toFixed(6);
+  };
+
+  // 格式化百分比
+  const formatPercent = (percent) => {
+    if (!percent) return null;
+    const value = parseFloat(percent);
+    return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  };
 
   return (
     <div className="trading-pair-card-clean">
       {/* 头部信息 */}
       <div className="trading-header-clean">
         <div className="trading-info-row">
-          <span className="trading-symbol-clean">{pair.symbol}</span>
-          {hasAnyEstimate(pair.symbol) && (
-            <span className="estimate-badge">
-              {symbolEstimates[pair.symbol]}
-            </span>
+          <span className="trading-symbol-clean">{symbol}</span>
+          {hasAnyEstimate(symbol) && (
+            <Tag size="small" color="blue" className="estimate-badge">
+              监听 {symbolEstimates[symbol] || ''}
+            </Tag>
           )}
         </div>
-        <button 
-          className="delete-btn-clean"
-          disabled={!canDeleteSymbol(pair.symbol)}
-          onClick={() => onDelete(pair.symbol)}
-          title={!canDeleteSymbol(pair.symbol) ? getDeleteDisabledReason(pair.symbol) : '删除交易对'}
-        >
-          ×
-        </button>
       </div>
 
-      {/* 价格信息 */}
+      {/* 价格信息区域 */}
       <div className="trading-price-section">
-        <PriceDisplay 
-          priceData={price}
-          loading={!price}
-          symbol={pair.symbol}
-        />
-      </div>
-
-      {/* 交易按钮 */}
-      {price && price.hasValidData && (
-        <div className="trading-controls">
-          <div className="trading-control-group">
-            <button 
-              className={`trading-control-btn long-btn ${hasPosition(pair.symbol, 'long') ? 'disabled' : ''}`}
-              disabled={hasPosition(pair.symbol, 'long')}
-              onClick={() => onTrade(pair.symbol, 'long')}
-              title={hasPosition(pair.symbol, 'long') ? '已有多头仓位' : '开多头仓位'}
-            >
-              {hasPosition(pair.symbol, 'long') ? '已开多' : '开多'}
-            </button>
-            <button 
-              className={`trading-control-btn short-btn ${hasPosition(pair.symbol, 'short') ? 'disabled' : ''}`}
-              disabled={hasPosition(pair.symbol, 'short')}
-              onClick={() => onTrade(pair.symbol, 'short')}
-              title={hasPosition(pair.symbol, 'short') ? '已有空头仓位' : '开空头仓位'}
-            >
-              {hasPosition(pair.symbol, 'short') ? '已开空' : '开空'}
-            </button>
+        <div className="price-info-section">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {/* 标记价格 */}
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '18px', fontWeight: '700', color: '#1f2937', marginBottom: '4px' }}>
+                ${formatPrice(priceInfo?.markPrice)}
+              </div>
+              {priceInfo?.priceChangePercent && (
+                <div style={{ 
+                  fontSize: '13px', 
+                  fontWeight: '600',
+                  color: parseFloat(priceInfo.priceChangePercent) >= 0 ? '#059669' : '#dc2626'
+                }}>
+                  {formatPercent(priceInfo.priceChangePercent)}
+                </div>
+              )}
+            </div>
+            
+            {/* 资金费率 */}
+            {!isMobile && priceInfo?.fundingRate !== undefined && (
+              <div style={{ 
+                textAlign: 'center',
+                fontSize: '11px',
+                color: '#6b7280'
+              }}>
+                <span>资金费率: </span>
+                <span style={{ 
+                  color: priceInfo.fundingRate >= 0 ? '#059669' : '#dc2626',
+                  fontWeight: '600'
+                }}>
+                  {(priceInfo.fundingRate).toFixed(4)}%
+                </span>
+              </div>
+            )}
           </div>
         </div>
-      )}
+      </div>
+
+      {/* 操作按钮 */}
+      <div className="trading-controls">
+        <div className="trading-control-group">
+          {hasValidPrice && (
+            <>
+              <button
+                className={`control-btn ${hasPosition(symbol, 'long') ? 'secondary-btn' : 'success-btn'} trading-control-btn`}
+                disabled={hasPosition(symbol, 'long')}
+                onClick={() => onAction(symbol, 'long')}
+              >
+                {hasPosition(symbol, 'long') ? '已开多' : '开多'}
+              </button>
+              <button
+                className={`control-btn ${hasPosition(symbol, 'short') ? 'secondary-btn' : 'danger-btn'} trading-control-btn`}
+                disabled={hasPosition(symbol, 'short')}
+                onClick={() => onAction(symbol, 'short')}
+              >
+                {hasPosition(symbol, 'short') ? '已开空' : '开空'}
+              </button>
+            </>
+          )}
+        </div>
+        <button
+          className={`control-btn ${hasAnyPosition(symbol) ? 'secondary-btn' : 'danger-btn'} trading-control-btn`}
+          disabled={!canDeleteSymbol(symbol)}
+          onClick={() => onAction(symbol, 'delete')}
+          title={!canDeleteSymbol(symbol) ? getDeleteDisabledReason(symbol) : '删除交易对'}
+          style={{ marginTop: '4px', fontSize: '11px', width: '100%' }}
+        >
+          删除
+        </button>
+      </div>
     </div>
   );
 };

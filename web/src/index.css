@@ -206,6 +206,48 @@ code {
   transition: all 0.15s ease;
 }
 
+/* 订单页面按钮样式 */
+.orders-action-btn {
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+  min-width: 70px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.orders-table-btn {
+  padding: 5px 10px !important;
+  font-size: 11px !important;
+  min-width: 45px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* 币种页面按钮样式 */
+.trading-pairs-header-btn {
+  padding: 8px 12px !important;
+  font-size: 12px !important;
+  min-width: 80px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+}
+
+.trading-pairs-action-btn {
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  min-width: 45px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .primary-btn {
   background: #f0f9ff;
   color: #0369a1;
@@ -267,6 +309,36 @@ code {
   .control-btn, .trading-control-btn {
     padding: 6px 4px;
     font-size: 10px;
+  }
+  
+  /* 订单页面移动端按钮优化 */
+  .orders-action-btn {
+    padding: 6px 10px !important;
+    font-size: 11px !important;
+    min-width: 60px;
+    height: 32px;
+  }
+  
+  .orders-table-btn {
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+    min-width: 40px;
+    height: 26px;
+  }
+  
+  /* 币种页面移动端按钮优化 */
+  .trading-pairs-header-btn {
+    padding: 5px 10px !important;
+    font-size: 11px !important;
+    min-width: 70px;
+    height: 32px;
+  }
+  
+  .trading-pairs-action-btn {
+    padding: 3px 6px !important;
+    font-size: 9px !important;
+    min-width: 35px;
+    height: 26px;
   }
   
   .page-title-clean {
@@ -336,6 +408,24 @@ code {
   font-size: 12px;
   color: #9ca3af;
   font-weight: 500;
+}
+
+/* 余额明细显示 */
+.balance-breakdown {
+  margin: 8px 0;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.balance-free {
+  color: #10b981;
+  font-weight: 500;
+}
+
+.balance-locked {
+  color: #f59e0b;
+  font-weight: 500;
+  margin-top: 2px;
 }
 
 /* 比例显示 */
@@ -925,6 +1015,36 @@ code {
     height: 40px !important;
     font-size: 14px !important;
     margin-bottom: 4px !important;
+  }
+  
+  /* 订单页面超小屏幕优化 */
+  .orders-action-btn {
+    padding: 5px 8px !important;
+    font-size: 10px !important;
+    min-width: 50px;
+    height: 30px;
+  }
+  
+  .orders-table-btn {
+    padding: 3px 6px !important;
+    font-size: 9px !important;
+    min-width: 35px;
+    height: 24px;
+  }
+  
+  /* 币种页面按钮优化 */
+  .trading-pairs-header-btn {
+    padding: 4px 8px !important;
+    font-size: 10px !important;
+    min-width: 60px;
+    height: 28px;
+  }
+  
+  .trading-pairs-action-btn {
+    padding: 2px 4px !important;
+    font-size: 8px !important;
+    min-width: 30px;
+    height: 22px;
   }
   
   .price-section {
@@ -1589,6 +1709,16 @@ code {
 .detail-value {
   color: #374151;
   font-weight: 600;
+}
+
+.detail-value.profit {
+  color: #16a34a;
+  font-weight: 700;
+}
+
+.detail-value.loss {
+  color: #dc2626;
+  font-weight: 700;
 }
 
 .detail-value.time {

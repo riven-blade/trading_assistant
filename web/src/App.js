@@ -73,6 +73,7 @@ function App() {
             <Route path="/trading-pairs" element={<TradingPairs />} />
             <Route path="/balances" element={<Balances />} />
             <Route path="/klines" element={<ChartPage />} />
+
           </Routes>
     </MainLayout>
   );

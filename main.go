@@ -7,6 +7,7 @@ import (
 	"trading_assistant/core"
 	"trading_assistant/pkg/config"
 	"trading_assistant/pkg/exchanges"
+	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
 	"trading_assistant/servers"
@@ -15,14 +16,9 @@ import (
 )
 
 func main() {
-	// 初始化日志
-	logrus.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp:   true,
-		TimestampFormat: "2006-01-02 15:04:05",
-	})
-	logrus.SetReportCaller(false)
-
-	logrus.Info("start trading assistant...")
+	// 设置日志级别
+	logrus.SetLevel(logrus.InfoLevel)
+	logrus.Info("启动交易助手...")
 
 	// 加载配置
 	config.LoadConfig()
@@ -33,92 +29,102 @@ func main() {
 	}
 
 	// 初始化Binance客户端
-	if err := exchanges.InitBinance(); err != nil {
-		logrus.Fatalf("Binance init fail: %v", err)
+	binanceConfig := binance.DefaultConfig()
+	binanceConfig.SetAPICredentials(
+		config.GlobalConfig.BinanceAPIKey,
+		config.GlobalConfig.BinanceSecretKey,
+	)
+	binanceConfig.MarketType = exchanges.MarketTypeFuture      // 期货市场
+	binanceConfig.TestNet = config.GlobalConfig.BinanceTestnet // 应用测试网配置
+
+	// 输出配置信息用于调试
+	logrus.WithFields(logrus.Fields{
+		"api_key_length": len(config.GlobalConfig.BinanceAPIKey),
+		"has_secret":     len(config.GlobalConfig.BinanceSecretKey) > 0,
+		"testnet":        config.GlobalConfig.BinanceTestnet,
+		"market_type":    binanceConfig.MarketType,
+	}).Info("Binance配置信息")
+
+	binanceClient, err := binance.New(binanceConfig)
+	if err != nil {
+		logrus.Fatalf("Binance client init fail: %v", err)
 	}
+	logrus.Info("Binance客户端已初始化")
 
 	// 初始化Telegram客户端
 	if err := telegram.InitTelegram(); err != nil {
 		logrus.Errorf("Telegram init fail: %v", err)
 	}
 
+	// 初始化市场数据管理器并同步数据
+	marketManager := core.NewMarketManager(binanceClient)
+	if err := marketManager.SyncMarketAndPriceData(); err != nil {
+		logrus.Errorf("同步市场数据和价格数据失败: %v", err)
+	}
+
 	// 初始化核心组件
-	core.InitPriceMonitor()
-	core.InitAccountManager()
+	core.InitPriceMonitor(binanceClient)
+	core.InitAccountManager(binanceClient)
 
-	// 启动市场数据WebSocket流
-	selectedCoins, err := redis.GlobalRedisClient.GetSelectedCoins()
-	if err != nil {
-		logrus.Errorf("获取筛选币种失败: %v", err)
+	// 启动WebSocket连接
+	if err := binanceClient.StartWebSocket(); err != nil {
+		logrus.Errorf("启动WebSocket失败: %v", err)
 	} else {
-		var symbols []string
-		for _, coin := range selectedCoins {
-			symbols = append(symbols, coin.Symbol)
-		}
+		logrus.Info("WebSocket已启动")
+	}
 
-		if len(symbols) > 0 {
-			if err := exchanges.GlobalWebSocketManager.StartMarketData(symbols); err != nil {
-				logrus.Errorf("启动市场数据WebSocket失败: %v", err)
-			} else {
-				logrus.Infof("市场数据WebSocket已启动，监听 %d 个币种", len(symbols))
-			}
-		}
+	// 启动价格订阅
+	if err := marketManager.StartOrderBookSubscriptions(); err != nil {
+		logrus.Errorf("启动价格订阅失败: %v", err)
 	}
 
 	// 启动价格监控
 	core.GlobalPriceMonitor.Start()
 
-	// 启动账户管理器（WebSocket监听持仓和余额）
+	// 启动账户管理器
 	core.GlobalAccountManager.Start()
 
 	// 创建HTTP服务器
-	httpServer := servers.NewHTTPServer()
+	server := servers.NewHTTPServer(binanceClient, marketManager)
+	go func() {
+		server.Start()
+	}()
 
-	// 启动HTTP服务器（在goroutine中）
-	go httpServer.Start()
-
-	// 等待中断信号
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	logrus.Info("trading assistant is running...")
-
-	// 等待退出信号
-	<-signalChan
-
-	logrus.Info("stopping trading assistant...")
+	logrus.Info("交易助手启动完成!")
 
 	// 优雅关闭
-	gracefulShutdown()
-
-	logrus.Info("trading assistant stopped")
+	gracefulShutdown(server, binanceClient, marketManager)
 }
 
 // gracefulShutdown 优雅关闭
-func gracefulShutdown() {
-	// 停止价格监控
-	if core.GlobalPriceMonitor != nil {
-		core.GlobalPriceMonitor.Stop()
+func gracefulShutdown(server *servers.HTTPServer, binanceClient *binance.Binance, marketManager *core.MarketManager) {
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	logrus.Info("正在关闭交易助手...")
+
+	// 停止HTTP服务器 (当前实现没有优雅关闭，直接退出)
+	logrus.Info("HTTP服务器将随程序退出关闭")
+
+	// 停止价格订阅
+	if marketManager != nil {
+		marketManager.StopOrderBookSubscriptions()
 	}
 
-	// 停止账户管理器
+	// 停止核心组件
 	if core.GlobalAccountManager != nil {
 		core.GlobalAccountManager.Stop()
 	}
 
-	// 停止WebSocket管理器
-	if exchanges.GlobalWebSocketManager != nil {
-		err := exchanges.GlobalWebSocketManager.Stop()
-		if err != nil {
-			return
-		}
+	if core.GlobalPriceMonitor != nil {
+		core.GlobalPriceMonitor.Stop()
 	}
 
-	// 发送关闭通知
-	if telegram.GlobalTelegramClient != nil {
-		err := telegram.GlobalTelegramClient.SendMessage("Trading Assistant Stopped")
-		if err != nil {
-			return
-		}
+	// 停止WebSocket连接
+	if binanceClient != nil {
+		binanceClient.StopWebSocket()
 	}
+
+	logrus.Info("交易助手已关闭")
 }

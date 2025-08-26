@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
 	"time"
 	"trading_assistant/models"
 	"trading_assistant/pkg/redis"
@@ -23,7 +25,7 @@ type PriceEstimateRequest struct {
 	Quantity    float64 `json:"quantity" binding:"required"`
 	Leverage    int     `json:"leverage"`    // 杠杆倍数
 	OrderType   string  `json:"order_type"`  // 订单类型：market, limit
-	MarginMode  string  `json:"margin_mode"` // cross, isolated (默认cross)
+	MarginMode  string  `json:"margin_mode"` // CROSS, ISOLATED (默认ISOLATED)
 	CreatedBy   string  `json:"created_by"`
 	TriggerType string  `json:"trigger_type"` // 触发类型
 }
@@ -50,10 +52,10 @@ func (p *PriceController) validatePriceEstimateRequest(req *PriceEstimateRequest
 
 	// 设置默认值并验证保证金模式
 	if req.MarginMode == "" {
-		req.MarginMode = "isolated" // 默认逐仓
+		req.MarginMode = "ISOLATED" // 默认逐仓
 	}
-	if req.MarginMode != "cross" && req.MarginMode != "isolated" {
-		return fmt.Errorf("保证金模式必须是 cross 或 isolated")
+	if req.MarginMode != "CROSS" && req.MarginMode != "ISOLATED" {
+		return fmt.Errorf("保证金模式必须是 CROSS 或 ISOLATED")
 	}
 
 	// 设置默认值并验证订单类型
@@ -78,6 +80,114 @@ func (p *PriceController) validatePriceEstimateRequest(req *PriceEstimateRequest
 	}
 
 	return nil
+}
+
+// formatPriceEstimatePrecision 格式化价格预估的精度
+func (p *PriceController) formatPriceEstimatePrecision(req *PriceEstimateRequest) error {
+	// 获取币种信息
+	coin, err := redis.GlobalRedisClient.GetCoin(req.Symbol)
+	if err != nil {
+		logrus.Warnf("获取币种信息失败，使用默认精度: %s, error: %v", req.Symbol, err)
+		// 使用默认精度
+		req.Quantity = parseFloat(fmt.Sprintf("%.6f", req.Quantity))
+		req.TargetPrice = parseFloat(fmt.Sprintf("%.4f", req.TargetPrice))
+		return nil
+	}
+
+	// 格式化数量精度
+	quantityPrecision := coin.GetQuantityPrecisionFromStepSize()
+	if quantityPrecision > 0 {
+		quantityFormat := fmt.Sprintf("%%.%df", quantityPrecision)
+		req.Quantity = parseFloat(fmt.Sprintf(quantityFormat, req.Quantity))
+
+		// 验证最小数量
+		if coin.MinQty != "" {
+			minQty := parseFloat(coin.MinQty)
+			if minQty > 0 && req.Quantity < minQty {
+				return fmt.Errorf("交易数量 %.6f 小于最小数量 %.6f", req.Quantity, minQty)
+			}
+		}
+
+		// 验证步长
+		if coin.StepSize != "" {
+			stepSize := parseFloat(coin.StepSize)
+			if stepSize > 0 {
+				// 使用数学上更精确的步长调整算法
+				steps := req.Quantity / stepSize
+				if math.Abs(steps-math.Round(steps)) > 1e-8 {
+					// 向上舍入到最近的步长，确保数量不会变为0
+					adjustedSteps := math.Ceil(steps)
+					if adjustedSteps < 1 {
+						adjustedSteps = 1
+					}
+					adjustedQuantity := adjustedSteps * stepSize
+
+					// 确保调整后的数量仍满足最小数量要求
+					minQty := parseFloat(coin.MinQty)
+					if minQty > 0 && adjustedQuantity < minQty {
+						// 如果调整后仍小于最小数量，计算需要的最小步数
+						minSteps := math.Ceil(minQty / stepSize)
+						adjustedQuantity = minSteps * stepSize
+					}
+
+					req.Quantity = parseFloat(fmt.Sprintf(quantityFormat, adjustedQuantity))
+
+					logrus.WithFields(logrus.Fields{
+						"symbol":            req.Symbol,
+						"original_quantity": steps * stepSize,
+						"adjusted_quantity": adjustedQuantity,
+						"step_size":         stepSize,
+						"steps":             adjustedSteps,
+					}).Debug("数量步长调整")
+				}
+			}
+		}
+	}
+
+	// 格式化价格精度（使用从TickSize计算的精度）
+	pricePrecision := coin.GetPricePrecisionFromTickSize()
+	if pricePrecision > 0 {
+		priceFormat := fmt.Sprintf("%%.%df", pricePrecision)
+		req.TargetPrice = parseFloat(fmt.Sprintf(priceFormat, req.TargetPrice))
+
+		// 验证最小价格
+		if coin.MinPrice != "" {
+			minPrice := parseFloat(coin.MinPrice)
+			if minPrice > 0 && req.TargetPrice < minPrice {
+				return fmt.Errorf("目标价格 %.6f 小于最小价格 %.6f", req.TargetPrice, minPrice)
+			}
+		}
+
+		// 验证价格步长
+		if coin.TickSize != "" {
+			tickSize := parseFloat(coin.TickSize)
+			if tickSize > 0 {
+				steps := req.TargetPrice / tickSize
+				if steps != float64(int(steps)) {
+					adjustedPrice := float64(int(steps)) * tickSize
+					req.TargetPrice = parseFloat(fmt.Sprintf(priceFormat, adjustedPrice))
+				}
+			}
+		}
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"symbol":       req.Symbol,
+		"quantity":     req.Quantity,
+		"target_price": req.TargetPrice,
+		"min_quantity": coin.MinQty,
+		"step_size":    coin.StepSize,
+		"min_price":    coin.MinPrice,
+		"tick_size":    coin.TickSize,
+	}).Debug("精度格式化完成")
+
+	return nil
+}
+
+// parseFloat 辅助函数，解析格式化后的浮点数
+func parseFloat(s string) float64 {
+	val, _ := strconv.ParseFloat(s, 64)
+	return val
 }
 
 // createPriceEstimateModel 创建价格预估模型
@@ -121,6 +231,15 @@ func (p *PriceController) CreatePriceEstimate(ctx *gin.Context) {
 		return
 	}
 
+	// 格式化数量和价格精度
+	if err := p.formatPriceEstimatePrecision(&req); err != nil {
+		logrus.Errorf("格式化精度失败: %v", err)
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "格式化精度失败: " + err.Error(),
+		})
+		return
+	}
+
 	// 创建价格预估模型
 	estimate := p.createPriceEstimateModel(&req)
 
@@ -152,9 +271,6 @@ func (p *PriceController) CreatePriceEstimate(ctx *gin.Context) {
 // GetPriceEstimates 获取可用的价格预估列表
 func (p *PriceController) GetPriceEstimates(ctx *gin.Context) {
 	symbol := ctx.Query("symbol")
-	status := ctx.Query("status")
-
-	logrus.Infof("查询价格预估: symbol=%s, status=%s", symbol, status)
 
 	if redis.GlobalRedisClient == nil {
 		logrus.Error("Redis客户端未初始化")
@@ -168,12 +284,9 @@ func (p *PriceController) GetPriceEstimates(ctx *gin.Context) {
 	var err error
 
 	if symbol != "" {
-		logrus.Infof("按交易对查询: %s", symbol)
 		estimates, err = redis.GlobalRedisClient.GetEstimatesBySymbol(symbol)
-		logrus.Infof("按交易对查询结果: 找到 %d 条记录", len(estimates))
 	} else {
 		estimates, err = redis.GlobalRedisClient.GetEstimates()
-		logrus.Infof("查询所有pending结果: 找到 %d 条记录", len(estimates))
 	}
 
 	if err != nil {
@@ -183,8 +296,7 @@ func (p *PriceController) GetPriceEstimates(ctx *gin.Context) {
 		})
 		return
 	}
-
-	logrus.Infof("最终返回 %d 条价格预估记录", len(estimates))
+	
 	ctx.JSON(http.StatusOK, gin.H{
 		"data":  estimates,
 		"total": len(estimates),
@@ -242,7 +354,7 @@ func (p *PriceController) TogglePriceEstimate(ctx *gin.Context) {
 	}
 
 	// 获取价格预估
-	estimate, err := redis.GlobalRedisClient.GetPriceEstimate(id)
+	estimate, err := redis.GlobalRedisClient.GetEstimateById(id)
 	if err != nil {
 		ctx.JSON(http.StatusNotFound, gin.H{
 			"error": "价格预估不存在",
@@ -271,5 +383,72 @@ func (p *PriceController) TogglePriceEstimate(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "价格预估状态更新成功",
 		"data":    estimate,
+	})
+}
+
+// GetAllSelectedCoinsPrices 获取所有选中币的markPrice数据
+func (p *PriceController) GetAllSelectedCoinsPrices(ctx *gin.Context) {
+	// 获取所有选中的币种
+	selectedCoins, err := redis.GlobalRedisClient.GetSelectedCoins()
+	if err != nil {
+		logrus.Errorf("获取选中币种失败: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "获取选中币种失败",
+		})
+		return
+	}
+
+	if len(selectedCoins) == 0 {
+		ctx.JSON(http.StatusOK, gin.H{
+			"data":  []interface{}{},
+			"count": 0,
+		})
+		return
+	}
+
+	var priceDataList []models.CoinPriceData
+	var successCount, errorCount int
+
+	for i := range selectedCoins {
+		coin := selectedCoins[i]
+		// 从Redis获取markPrice数据
+		markPrice, err := redis.GlobalRedisClient.GetMarkPrice(coin.Symbol)
+		if err != nil {
+			logrus.Debugf("获取 %s markPrice失败: %v", coin.Symbol, err)
+			errorCount++
+			continue
+		}
+
+		// 构造返回数据
+		priceData := models.CoinPriceData{
+			Symbol:       markPrice.Symbol,
+			MarkPrice:    markPrice.MarkPrice,
+			IndexPrice:   markPrice.IndexPrice,
+			FundingRate:  markPrice.FundingRate,
+			FundingTime:  markPrice.FundingTime,
+			UpdateTime:   markPrice.TimeStamp,
+			PriceChange:  coin.PriceChange,        // 从币种信息获取
+			PricePercent: coin.PriceChangePercent, // 从币种信息获取
+		}
+
+		priceDataList = append(priceDataList, priceData)
+		successCount++
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"total_coins":    len(selectedCoins),
+		"success_count":  successCount,
+		"error_count":    errorCount,
+		"returned_count": len(priceDataList),
+	}).Debug("批量获取选中币种价格数据完成")
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"data":  priceDataList,
+		"count": len(priceDataList),
+		"stats": gin.H{
+			"total_coins":   len(selectedCoins),
+			"success_count": successCount,
+			"error_count":   errorCount,
+		},
 	})
 }

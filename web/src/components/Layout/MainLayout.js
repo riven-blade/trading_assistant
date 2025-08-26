@@ -61,7 +61,7 @@ const MainLayout = ({ children, onLogout }) => {
       key: '/balances',
       icon: <WalletOutlined />,
       label: '余额',
-    },
+    }
   ];
 
   const userMenuItems = [

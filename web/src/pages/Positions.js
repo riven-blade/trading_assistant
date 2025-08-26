@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Row, 
   Col, 
@@ -8,11 +8,8 @@ import {
   Spin,
   Empty
 } from 'antd';
-import { 
-  ReloadOutlined
-} from '@ant-design/icons';
-import api, { getCoinPrecision, toggleEstimateEnabled } from '../services/api';
-import { autoFixPriceAndQuantity, validatePriceComplete, validateQuantityComplete } from '../utils/precision';
+import api, { toggleEstimateEnabled } from '../services/api';
+import { autoFixPriceAndQuantity, validatePriceComplete, validateQuantityComplete, calculateUsdtAmount, calculatePnl } from '../utils/precision';
 
 // 通用组件和Hooks
 import PageHeader from '../components/Common/PageHeader';
@@ -22,6 +19,7 @@ import QuantitySlider from '../components/Trading/QuantitySlider';
 import MonitoringCard from '../components/Monitoring/MonitoringCard';
 import useAccountData from '../hooks/useAccountData';
 import useEstimates from '../hooks/useEstimates';
+import usePriceData from '../hooks/usePriceData';
 import { ACTIONS } from '../utils/constants';
 
 const { Text } = Typography;
@@ -29,15 +27,14 @@ const { Text } = Typography;
 const Positions = () => {
   // 操作相关状态
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const [refreshing, setRefreshing] = useState(false); // 刷新状态
   const [currentPosition, setCurrentPosition] = useState(null);
   const [actionType, setActionType] = useState('');
   const [currentPrice, setCurrentPrice] = useState(0);
   const [targetPrice, setTargetPrice] = useState(0);
   const [quantity, setQuantity] = useState(0);
-  const [usdtAmount, setUsdtAmount] = useState(0);
   const [pricePercentage, setPricePercentage] = useState(0);
   const [coinPrecision, setCoinPrecision] = useState(null);
+  const [confirmLoading, setConfirmLoading] = useState(false);
 
   // 详情抽屉相关状态
   const [detailDrawerVisible, setDetailDrawerVisible] = useState(false);
@@ -49,82 +46,75 @@ const Positions = () => {
   const { 
     accountValue, 
     positions, 
-    loading: positionsLoading,
-    fetchPositions,
-    fetchAccountInfo 
+    loading: positionsLoading
   } = useAccountData();
 
   // 监听数量状态
   const [positionsWithMonitors, setPositionsWithMonitors] = useState([]);
 
-  const { deleteEstimate } = useEstimates();
+  const { estimates, deleteEstimate, getEstimatesBySymbol } = useEstimates();
 
-  // 监听positions变化，获取监听数量
-  useEffect(() => {
-    if (positions.length > 0) {
-      fetchPositionsWithMonitors(positions);
-    } else {
-      setPositionsWithMonitors([]);
-    }
-  }, [positions]);
+  // 使用全局价格数据
+  const { 
+    getPriceBySymbol,
+    loading: priceDataLoading,
+    priceData,
+    hasPriceData
+  } = usePriceData();
+
+
 
   // 获取所有持仓的监听数量
-  const fetchPositionsWithMonitors = async (positionsData) => {
+  const fetchPositionsWithMonitors = useCallback((positionsData) => {
     try {
-      const positionsWithCount = await Promise.all(
-        positionsData.map(async (position) => {
-          try {
-            const estimates = await api.get(`/estimates?symbol=${position.symbol}`);
-            const filteredEstimates = (estimates.data.data || []).filter(estimate => 
-              estimate.side === position.side.toLowerCase() && estimate.status === 'listening'
-            );
-            return {
-              ...position,
-              monitorCount: filteredEstimates.length
-            };
-          } catch (error) {
-            console.error(`获取 ${position.symbol} 监听数量失败:`, error);
-            return {
-              ...position,
-              monitorCount: 0
-            };
-          }
-        })
-      );
+      const positionsWithCount = positionsData.map((position) => {
+        // 从全局estimates数据中过滤出该持仓相关的监听
+        const filteredEstimates = getEstimatesBySymbol(position.symbol, 'listening').filter(estimate => 
+          estimate.side === position.side.toLowerCase()
+        );
+        
+        return {
+          ...position,
+          monitorCount: filteredEstimates.length
+        };
+      });
+      
       setPositionsWithMonitors(positionsWithCount);
     } catch (error) {
-      console.error('获取持仓监听数量失败:', error);
+      console.error('计算持仓监听数量失败:', error);
       setPositionsWithMonitors(positionsData.map(pos => ({ ...pos, monitorCount: 0 })));
     }
-  };
+  }, [getEstimatesBySymbol]);
 
-  // 获取当前价格
-  const fetchCurrentPrice = async (symbol) => {
-    try {
-      const response = await api.get(`/monitor/orderbook/${symbol}`);
-      const orderbook = response.data.data;
-      if (orderbook?.bids && orderbook?.asks) {
-        const bestBid = parseFloat(orderbook.bids[0]?.price || 0);
-        const bestAsk = parseFloat(orderbook.asks[0]?.price || 0);
-        return (bestBid + bestAsk) / 2;
-      }
-      return 0;
-    } catch (error) {
-      message.error('获取当前价格失败');
+  // 获取当前价格 - 使用全局价格数据
+  const getCurrentPrice = useCallback((symbol) => {
+    // 如果价格数据还在加载中，返回0
+    if (priceDataLoading) {
       return 0;
     }
-  };
+    
+    // 检查是否有该币种的价格数据
+    if (!hasPriceData(symbol)) {
+      console.warn(`[价格] ${symbol} 的价格数据不可用`);
+      return 0;
+    }
+    
+    const priceInfo = getPriceBySymbol(symbol);
+    const price = priceInfo?.markPrice || priceInfo?.currentPrice || 0;
+    
+    return price;
+  }, [getPriceBySymbol, priceDataLoading, hasPriceData]);
 
   // 统一的操作处理器
   const handleAction = async (position, action) => {
     setCurrentPosition(position);
     setActionType(action);
     
-    const price = await fetchCurrentPrice(position.symbol);
+    const price = getCurrentPrice(position.symbol);
     setCurrentPrice(price);
     
-    const precision = await getCoinPrecision(position.symbol);
-    setCoinPrecision(precision);
+    // 移除精度获取 - 后端会处理精度
+    setCoinPrecision(null);
     
     const config = ACTIONS[action];
     const entryPrice = position.entry_price || price;
@@ -141,42 +131,13 @@ const Positions = () => {
     // 计算目标价格
     const basePrice = config.priceBase === 'current' ? price : entryPrice;
     let defaultTargetPrice = basePrice * (1 + defaultPercentage / 100);
-    
-    // 应用精度修正
-    if (precision) {
-      const { price: adjustedPrice } = autoFixPriceAndQuantity(defaultTargetPrice, 0, precision);
-      defaultTargetPrice = adjustedPrice;
-    }
-    
+
     // 设置默认数量（持仓数量的50%）
     let defaultQuantity = Math.abs(position.size) * 0.5;
-    if (precision) {
-      const { quantity: adjustedQuantity } = autoFixPriceAndQuantity(0, defaultQuantity, precision);
-      defaultQuantity = adjustedQuantity;
-    }
-    
-    // 计算USDT金额 - 根据操作类型区分
-    let defaultUsdtAmount;
-    if (action === 'add_position') {
-      // 加仓：显示需要投入的USDT（保证金）
-      defaultUsdtAmount = (defaultQuantity * defaultTargetPrice) / position.leverage;
-    } else {
-      // 止盈/止损：显示盈利的USDT，需要考虑方向
-      let profitPerCoin;
-      if (isLong) {
-        // 多头：目标价格 - 开仓价格
-        profitPerCoin = defaultTargetPrice - entryPrice;
-      } else {
-        // 空头：开仓价格 - 目标价格
-        profitPerCoin = entryPrice - defaultTargetPrice;
-      }
-      defaultUsdtAmount = profitPerCoin * defaultQuantity;
-    }
     
     setPricePercentage(defaultPercentage);
     setTargetPrice(defaultTargetPrice);
     setQuantity(defaultQuantity);
-    setUsdtAmount(defaultUsdtAmount);
     setDrawerVisible(true);
   };
 
@@ -204,29 +165,7 @@ const Positions = () => {
       if (quantity > newMaxQuantity) {
         const adjustedQuantity = newMaxQuantity;
         setQuantity(adjustedQuantity);
-        
-        // 重新计算USDT金额
-        const newUsdtAmount = (adjustedQuantity * newTargetPrice) / currentPosition.leverage;
-        setUsdtAmount(newUsdtAmount);
-      } else {
-        // 重新计算USDT金额
-        const newUsdtAmount = (quantity * newTargetPrice) / currentPosition.leverage;
-        setUsdtAmount(newUsdtAmount);
       }
-    } else {
-      // 止盈/止损：显示盈利的USDT，需要考虑方向
-      const entryPrice = currentPosition.entry_price;
-      const isLong = currentPosition.side === 'LONG';
-      let profitPerCoin;
-      if (isLong) {
-        // 多头：目标价格 - 开仓价格
-        profitPerCoin = newTargetPrice - entryPrice;
-      } else {
-        // 空头：开仓价格 - 目标价格
-        profitPerCoin = entryPrice - newTargetPrice;
-      }
-      const newUsdtAmount = profitPerCoin * quantity;
-      setUsdtAmount(newUsdtAmount);
     }
   };
 
@@ -240,27 +179,6 @@ const Positions = () => {
     }
     
     setQuantity(finalQuantity);
-    
-    // 重新计算USDT金额 - 根据操作类型区分
-    let newUsdtAmount;
-    if (actionType === 'add_position') {
-      // 加仓：显示需要投入的USDT
-      newUsdtAmount = (finalQuantity * targetPrice) / currentPosition.leverage;
-    } else {
-      // 止盈/止损：显示盈利的USDT，需要考虑方向
-      const entryPrice = currentPosition.entry_price;
-      const isLong = currentPosition.side === 'LONG';
-      let profitPerCoin;
-      if (isLong) {
-        // 多头：目标价格 - 开仓价格
-        profitPerCoin = targetPrice - entryPrice;
-      } else {
-        // 空头：开仓价格 - 目标价格
-        profitPerCoin = entryPrice - targetPrice;
-      }
-      newUsdtAmount = profitPerCoin * finalQuantity;
-    }
-    setUsdtAmount(newUsdtAmount);
   };
 
   // 获取最大数量
@@ -286,8 +204,10 @@ const Positions = () => {
 
   // 确认操作
   const handleConfirm = async () => {
+    if (confirmLoading) return;
+    
+    setConfirmLoading(true);
     try {
-      // 在提交前再次修正精度
       let finalPrice = targetPrice;
       let finalQuantity = quantity;
       
@@ -328,30 +248,26 @@ const Positions = () => {
       message.success(`${ACTIONS[actionType].title}监听已创建`);
       setDrawerVisible(false);
       
-      // 刷新持仓监听数量
-      fetchPositionsWithMonitors(positions);
-      
-      // 如果详情抽屉是打开的，刷新详情
-      if (detailDrawerVisible && detailPosition) {
-        fetchPositionDetails(detailPosition);
-      }
+      // 数据会通过全局estimates自动更新，无需手动刷新
     } catch (error) {
+      console.error('创建订单失败:', error);
       message.error('创建订单失败');
+    } finally {
+      setConfirmLoading(false);
     }
   };
 
-  // 获取仓位详情
-  const fetchPositionDetails = async (position) => {
+  // 获取仓位详情（从全局estimates数据中过滤）
+  const fetchPositionDetails = useCallback((position) => {
     setEstimatesLoading(true);
     try {
-      const data = await api.get(`/estimates?symbol=${position.symbol}`);
-      const estimatesData = data.data.data || [];
-      const filteredEstimates = estimatesData.filter(estimate => 
-        estimate.side === position.side.toLowerCase() && estimate.status === 'listening'
+      // 从全局estimates数据中过滤出该持仓相关的监听
+      const filteredEstimates = getEstimatesBySymbol(position.symbol, 'listening').filter(estimate => 
+        estimate.side === position.side.toLowerCase()
       );
       
       // 获取当前价格并计算差异
-      const currentPrice = await fetchCurrentPrice(position.symbol);
+      const currentPrice = getCurrentPrice(position.symbol);
       
       const estimatesWithPrice = filteredEstimates.map(estimate => {
         const priceDiff = currentPrice > 0 ? 
@@ -367,12 +283,42 @@ const Positions = () => {
       
       setPositionEstimates(estimatesWithPrice);
     } catch (error) {
-      message.error('获取仓位详情失败');
+      console.error('获取仓位详情失败:', error);
       setPositionEstimates([]);
     } finally {
       setEstimatesLoading(false);
     }
-  };
+  }, [getEstimatesBySymbol, getCurrentPrice]);
+
+  // 监听positions变化，获取监听数量
+  useEffect(() => {
+    if (positions.length > 0) {
+      fetchPositionsWithMonitors(positions);
+    } else {
+      setPositionsWithMonitors([]);
+    }
+  }, [positions, fetchPositionsWithMonitors]);
+
+  // 监听estimates数据变化，实时更新持仓监听数量
+  useEffect(() => {
+    if (positions.length > 0) {
+      fetchPositionsWithMonitors(positions);
+    }
+  }, [estimates, positions, fetchPositionsWithMonitors]);
+
+  // 监听estimates数据变化，实时更新详情抽屉中的数据
+  useEffect(() => {
+    if (detailPosition && detailDrawerVisible) {
+      fetchPositionDetails(detailPosition);
+    }
+  }, [estimates, detailPosition, detailDrawerVisible, fetchPositionDetails]);
+
+  // 监听价格数据加载完成，更新详情抽屉中的价格
+  useEffect(() => {
+    if (detailPosition && detailDrawerVisible && !priceDataLoading && Object.keys(priceData).length > 0) {
+      fetchPositionDetails(detailPosition);
+    }
+  }, [priceDataLoading, priceData, detailPosition, detailDrawerVisible, fetchPositionDetails]);
 
   const openDetailDrawer = (position) => {
     setDetailPosition(position);
@@ -387,16 +333,8 @@ const Positions = () => {
   };
 
   const handleDeleteEstimate = async (estimateId) => {
-    const success = await deleteEstimate(estimateId);
-    if (success) {
-      // 刷新持仓监听数量
-      fetchPositionsWithMonitors(positions);
-      
-      // 如果详情抽屉是打开的，刷新详情
-      if (detailPosition) {
-        fetchPositionDetails(detailPosition);
-      }
-    }
+    await deleteEstimate(estimateId);
+    // 数据会通过全局estimates自动更新，无需手动刷新
   };
 
   const handleToggleEstimate = async (estimateId, enabled) => {
@@ -404,40 +342,14 @@ const Positions = () => {
       await toggleEstimateEnabled(estimateId, enabled);
       message.success(`监听已${enabled ? '开启' : '关闭'}`);
       
-      // 刷新持仓监听数量
-      fetchPositionsWithMonitors(positions);
-      
-      // 如果详情抽屉是打开的，刷新详情
-      if (detailPosition) {
-        fetchPositionDetails(detailPosition);
-      }
+      // 数据会通过全局estimates自动更新，无需手动刷新
     } catch (error) {
       message.error('切换监听状态失败');
     }
   };
 
   // 页面操作配置
-  const headerActions = [
-    {
-      icon: <ReloadOutlined />,
-      loading: refreshing,
-      onClick: async () => {
-        setRefreshing(true);
-        try {
-          await Promise.all([
-            fetchPositions(),
-            fetchAccountInfo()
-          ]);
-          // 刷新后重新获取监听数量会通过useEffect自动触发
-        } catch (error) {
-          console.error('刷新失败:', error);
-        } finally {
-          setRefreshing(false);
-        }
-      },
-      children: '刷新'
-    }
-  ];
+  const headerActions = [];
 
   if (positionsLoading) {
     return <Spin size="large" style={{ display: 'block', textAlign: 'center', padding: '50px' }} />;
@@ -465,6 +377,7 @@ const Positions = () => {
             >
               <PositionCard
                 position={position}
+                currentPrice={getCurrentPrice(position.symbol)}
                 onAction={handleAction}
                 onViewDetails={openDetailDrawer}
               />
@@ -522,8 +435,9 @@ const Positions = () => {
               actionType === 'take_profit' ? 'success' : 'danger'
             }`}
             onClick={handleConfirm}
+            disabled={confirmLoading}
           >
-            确认{ACTIONS[actionType]?.title}
+            {confirmLoading ? '处理中...' : `确认${ACTIONS[actionType]?.title}`}
           </button>
         }
       >
@@ -576,7 +490,6 @@ const Positions = () => {
               percentage={pricePercentage}
               onPercentageChange={handlePriceSliderChange}
               targetPrice={targetPrice}
-              precision={coinPrecision}
               config={ACTIONS[actionType]}
             />
 
@@ -586,7 +499,6 @@ const Positions = () => {
               quantity={quantity}
               maxQuantity={getMaxQuantity()}
               onQuantityChange={handleQuantitySliderChange}
-              precision={coinPrecision}
               symbol={currentPosition.symbol}
               config={ACTIONS[actionType]}
             />
@@ -600,25 +512,25 @@ const Positions = () => {
               border: '1px solid #bae6fd'
             }}>
               {actionType === 'add_position' ? (
-                <>
-                  <Text strong>预计使用: {usdtAmount.toFixed(2)} USDT</Text>
-                  <br />
-                  <Text type="secondary">
-                    可用余额: {accountValue.usdt_free.toFixed(2)} USDT
-                  </Text>
-                </>
+                (() => {
+                  const marginRequired = calculateUsdtAmount(quantity, targetPrice, currentPosition.leverage);
+                  return (
+                    <>
+                      <Text strong>预计使用: {marginRequired.toFixed(2)} USDT</Text>
+                      <br />
+                      <Text type="secondary">
+                        可用余额: {accountValue.usdt_free.toFixed(2)} USDT
+                      </Text>
+                    </>
+                  );
+                })()
               ) : (
-                <>
-                  <Text strong>预计盈利: {usdtAmount.toFixed(2)} USDT</Text>
-                  <br />
-                  <Text type="secondary">
-                    {(() => {
-                      const margin = (currentPosition.entry_price * Math.abs(currentPosition.size)) / currentPosition.leverage;
-                      const profitPercentage = margin > 0 ? (usdtAmount / margin * 100) : 0;
-                      return `基于保证金: ${profitPercentage.toFixed(2)}%`;
-                    })()}
-                  </Text>
-                </>
+                (() => {
+                  const expectedPnl = calculatePnl(quantity, currentPosition.entry_price, targetPrice, currentPosition.side);
+                  return (
+                    <Text strong>预计盈亏: {expectedPnl.toFixed(2)} USDT</Text>
+                  );
+                })()
               )}
             </div>
           </div>
@@ -682,6 +594,7 @@ const Positions = () => {
                     <MonitoringCard
                       key={estimate.id}
                       estimate={estimate}
+                      currentPosition={detailPosition}
                       onDelete={handleDeleteEstimate}
                       onToggle={handleToggleEstimate}
                     />

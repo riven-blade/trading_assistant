@@ -3,7 +3,6 @@ import {
   Card, 
   Row, 
   Col, 
-  Button, 
   Table, 
   Typography, 
   Tag, 
@@ -14,21 +13,19 @@ import {
   Badge,
   Statistic,
   Space,
-  Select,
-  Switch
+  Select
 } from 'antd';
 import { 
   ReloadOutlined,
-  DeleteOutlined,
   LineChartOutlined,
   BarChartOutlined
 } from '@ant-design/icons';
-import api from '../services/api';
+import api, { getAllEstimates } from '../services/api';
 
 // 通用组件
 import PageHeader from '../components/Common/PageHeader';
 
-import useEstimates from '../hooks/useEstimates';
+import usePriceData from '../hooks/usePriceData';
 import { ORDER_STATUS_MAP } from '../utils/constants';
 
 const { Text } = Typography;
@@ -43,24 +40,44 @@ const Orders = () => {
   const [estimateSymbol, setEstimateSymbol] = useState('');
   const [selectedCoins, setSelectedCoins] = useState([]);
   
+  // 价格预估相关状态
+  const [estimates, setEstimates] = useState([]);
+  const [estimatesLoading, setEstimatesLoading] = useState(true);
   const isMountedRef = useRef(true); // 组件挂载状态
 
-  // 使用监听管理Hook
+  // 使用全局价格数据
   const { 
-    estimates, 
-    loading, 
-    fetchEstimates: fetchEstimatesHook, 
-    deleteEstimate: deleteEstimateHook,
-    toggleEstimate 
-  } = useEstimates();
+    getPriceBySymbol
+  } = usePriceData();
 
-  // 包装fetchEstimates以包含价格获取
-  const fetchEstimates = async (symbol = estimateSymbol) => {
-    const estimatesData = await fetchEstimatesHook(symbol);
-    if (estimatesData.length > 0) {
-      await fetchCurrentPrices(estimatesData);
+  // 获取所有价格预估数据
+  const fetchAllEstimates = useCallback(async (symbol = estimateSymbol) => {
+    try {
+      if (!isMountedRef.current) return;
+      setEstimatesLoading(true);
+      
+      const estimatesData = await getAllEstimates(symbol || null);
+      
+      if (!isMountedRef.current) return;
+      
+      // 按时间倒序排列
+      const sortedEstimates = estimatesData.sort((a, b) => {
+        return new Date(b.created_at) - new Date(a.created_at);
+      });
+      
+      setEstimates(sortedEstimates);
+      console.log(`[订单页面] 获取到 ${estimatesData.length} 条价格预估数据`);
+    } catch (error) {
+      console.error('获取价格预估数据失败:', error);
+      if (isMountedRef.current) {
+        message.error('获取价格预估数据失败');
+      }
+    } finally {
+      if (isMountedRef.current) {
+        setEstimatesLoading(false);
+      }
     }
-  };
+  }, [estimateSymbol]);
 
   // 获取已选中的币种列表
   const fetchSelectedCoins = useCallback(async () => {
@@ -110,15 +127,10 @@ const Orders = () => {
     const initializeData = async () => {
       if (!isMountedRef.current) return;
       
-      // 获取订单状态和币种列表
+      // 获取订单状态、价格预估和币种列表
       await fetchOrders();
+      await fetchAllEstimates();
       await fetchSelectedCoins();
-      
-      // 初始获取estimates和价格
-      const estimatesData = await fetchEstimatesHook();
-      if (estimatesData.length > 0 && isMountedRef.current) {
-        await fetchCurrentPrices(estimatesData);
-      }
     };
     
     initializeData();
@@ -132,72 +144,78 @@ const Orders = () => {
     };
   }, []);
 
-  // 当estimates数据变化时，获取当前价格
-  useEffect(() => {
-    if (estimates.length > 0) {
-      fetchCurrentPrices(estimates);
-    }
-  }, [estimates]);
-
-  // 获取当前价格
-  const fetchCurrentPrices = async (estimatesData) => {
+  // 获取当前价格 - 使用全局价格数据
+  const fetchCurrentPrices = useCallback((estimatesData) => {
     if (!isMountedRef.current) return;
     
     try {
       setPricesLoading(true);
       const symbols = [...new Set(estimatesData.map(estimate => estimate.symbol))];
       
-      const pricePromises = symbols.map(async (symbol) => {
-        try {
-          const response = await api.get(`/monitor/orderbook/${symbol}`);
-          const orderbook = response.data.data;
-          
-          if (orderbook?.bids && orderbook?.asks && orderbook.bids.length > 0 && orderbook.asks.length > 0) {
-            const bestBid = parseFloat(orderbook.bids[0].price);
-            const bestAsk = parseFloat(orderbook.asks[0].price);
-            const currentPrice = (bestBid + bestAsk) / 2;
-            
-            return { symbol, currentPrice };
-          }
-          return { symbol, currentPrice: 0 };
-        } catch (error) {
-          console.error(`获取 ${symbol} 价格失败:`, error);
-          return { symbol, currentPrice: 0 };
-        }
-      });
-
-      const priceResults = await Promise.all(pricePromises);
-      
-      if (!isMountedRef.current) return;
-      
       const pricesMap = {};
-      priceResults.forEach(({ symbol, currentPrice }) => {
-        pricesMap[symbol] = currentPrice;
+      symbols.forEach(symbol => {
+        const priceData = getPriceBySymbol(symbol);
+        pricesMap[symbol] = priceData?.markPrice || priceData?.currentPrice || 0;
       });
       
       setCurrentPrices(pricesMap);
     } catch (error) {
-      console.error('获取当前价格失败:', error);
+      console.error('获取价格数据失败:', error);
     } finally {
       if (isMountedRef.current) {
         setPricesLoading(false);
       }
     }
-  };
+  }, [getPriceBySymbol]);
 
-  // 删除价格预估
-  const handleDeleteEstimate = async (id) => {
-    const success = await deleteEstimateHook(id);
-    if (success) {
-      await fetchEstimates(estimateSymbol);
+  // 当estimates数据变化时，获取当前价格
+  useEffect(() => {
+    if (estimates.length > 0) {
+      fetchCurrentPrices(estimates);
+    }
+  }, [estimates, fetchCurrentPrices]);
+
+  // 删除单个价格预估
+  const handleDeleteEstimate = async (estimateId) => {
+    try {
+      setEstimatesLoading(true);
+      // 这里假设有一个单个删除的API，我们先用现有的方式
+      await api.delete(`/estimates/${estimateId}`);
+      message.success('删除价格预估成功');
+      
+      // 刷新数据
+      await fetchAllEstimates();
+    } catch (error) {
+      console.error('删除价格预估失败:', error);
+      message.error('删除价格预估失败');
+    } finally {
+      setEstimatesLoading(false);
     }
   };
 
-  // 切换价格监听状态
-  const handleToggleEstimate = async (id, enabled) => {
-    const success = await toggleEstimate(id, enabled);
-    if (success) {
-      await fetchEstimates(estimateSymbol);
+  // 取消订单
+  const handleCancelOrder = async (orderId, exchangeId, symbol) => {
+    try {
+      setOrdersLoading(true);
+      
+      const response = await api.post('/monitor/orders/cancel', {
+        order_id: orderId,
+        exchange_id: exchangeId,
+        symbol: symbol
+      });
+      
+      if (response.data.success) {
+        message.success('订单取消成功');
+        // 刷新订单列表
+        await fetchOrders(orderSymbol);
+      } else {
+        message.error(`取消订单失败: ${response.data.message || '未知错误'}`);
+      }
+    } catch (error) {
+      console.error('取消订单失败:', error);
+      message.error('取消订单失败');
+    } finally {
+      setOrdersLoading(false);
     }
   };
 
@@ -281,11 +299,24 @@ const Orders = () => {
       }
     },
     {
-      title: 'USDT金额',
-      dataIndex: 'usdt_amount',
-      key: 'usdt_amount',
-      width: 100,
-      render: (amount) => <Text>${amount.toFixed(2)} USDT</Text>
+      title: '交易数量',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: 120,
+      render: (quantity, record) => {
+        const baseAsset = record.symbol?.replace('USDT', '') || '';
+        return <Text>{quantity?.toFixed(6)} {baseAsset}</Text>
+      }
+    },
+    {
+      title: '预估金额',
+      dataIndex: 'target_price',
+      key: 'estimated_amount',
+      width: 120,
+      render: (targetPrice, record) => {
+        const estimatedAmount = (record.quantity || 0) * (targetPrice || 0);
+        return <Text>${estimatedAmount.toFixed(2)} USDT</Text>
+      }
     },
     {
       title: '杠杆',
@@ -309,21 +340,7 @@ const Orders = () => {
         return <Tag color={statusInfo.color}>{statusInfo.text}</Tag>;
       }
     },
-    {
-      title: '监听开关',
-      dataIndex: 'enabled',
-      key: 'enabled',
-      width: 100,
-      render: (enabled, record) => (
-        <Switch
-          checked={enabled}
-          onChange={(checked) => handleToggleEstimate(record.id, checked)}
-          checkedChildren="启用"
-          unCheckedChildren="关闭"
-          size="small"
-        />
-      ),
-    },
+
     {
       title: '创建时间',
       dataIndex: 'created_at',
@@ -338,24 +355,32 @@ const Orders = () => {
       render: (_, record) => (
         <Popconfirm
           title="确认删除此价格预估？"
+          description="删除后监听将无法恢复"
           onConfirm={() => handleDeleteEstimate(record.id)}
-          okText="确认"
+          okText="确认删除"
           cancelText="取消"
+          okType="danger"
         >
-          <Button 
-            type="link" 
-            size="small"
-            danger
-            icon={<DeleteOutlined />}
+          <button 
+            className="control-btn danger-btn orders-table-btn"
+            disabled={estimatesLoading}
           >
             删除
-          </Button>
+          </button>
         </Popconfirm>
-      ),
-    },
+      )
+    }
+
   ];
 
   const orderColumns = [
+    {
+      title: '订单ID',
+      dataIndex: 'id',
+      key: 'id',
+      width: 120,
+      render: (id) => <Text style={{ fontSize: '12px', fontFamily: 'monospace' }}>{String(id)}</Text>
+    },
     {
       title: '交易对',
       dataIndex: 'symbol',
@@ -414,17 +439,45 @@ const Orders = () => {
       key: 'created_at',
       width: 120,
       render: (time) => new Date(time).toLocaleString()
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 80,
+      render: (_, record) => {
+        // 只有NEW状态的订单可以取消
+        if (record.status === 'NEW') {
+          return (
+            <Popconfirm
+              title="确认取消此订单？"
+              description="取消后订单将无法恢复"
+              onConfirm={() => handleCancelOrder(record.id, record.exchange_id, record.symbol)}
+              okText="确认取消"
+              cancelText="取消"
+              okType="danger"
+            >
+              <button 
+                className="control-btn danger-btn orders-table-btn"
+                disabled={ordersLoading}
+              >
+                取消
+              </button>
+            </Popconfirm>
+          );
+        }
+        return <Text type="secondary">-</Text>;
+      },
     }
   ];
 
   // 计算统计信息
   const getEstimatesStats = () => {
     const total = estimates.length;
-    const pending = estimates.filter(e => e.status === 'listening').length;
-    const executing = estimates.filter(e => e.status === 'triggered').length;
-    const completed = estimates.filter(e => e.status === 'failed').length;
+    const listening = estimates.filter(e => e.status === 'listening').length;
+    const triggered = estimates.filter(e => e.status === 'triggered').length;
+    const failed = estimates.filter(e => e.status === 'failed').length;
     
-    return { total, pending, executing, completed };
+    return { total, listening, triggered, failed };
   };
 
   const getOrdersStats = () => {
@@ -443,10 +496,10 @@ const Orders = () => {
   const headerActions = [
     {
       icon: <ReloadOutlined />,
-      loading: activeTab === 'estimates' ? pricesLoading : ordersLoading,
+      loading: activeTab === 'estimates' ? estimatesLoading || pricesLoading : ordersLoading,
       onClick: () => {
         if (activeTab === 'estimates') {
-          fetchEstimates(estimateSymbol);
+          fetchAllEstimates();
         } else {
           fetchOrders();
         }
@@ -455,9 +508,9 @@ const Orders = () => {
     }
   ];
 
-  const headerExtra = activeTab === 'estimates' && pricesLoading && (
+  const headerExtra = activeTab === 'estimates' && (estimatesLoading || pricesLoading) && (
     <Text type="secondary" style={{ fontSize: '12px' }}>
-      正在更新价格...
+      {estimatesLoading ? '正在加载数据...' : '正在更新价格...'}
     </Text>
   );
 
@@ -472,7 +525,7 @@ const Orders = () => {
       <Tabs activeKey={activeTab} onChange={setActiveTab}>
         <Tabs.TabPane 
           tab={
-            <Badge count={estimatesStats.pending} offset={[10, 0]}>
+            <Badge count={estimatesStats.listening} offset={[10, 0]}>
               <span>价格预估</span>
             </Badge>
           } 
@@ -492,8 +545,8 @@ const Orders = () => {
             <Col xs={6} sm={6} md={6} lg={6}>
               <Card size="small">
                 <Statistic
-                  title="待执行"
-                  value={estimatesStats.pending}
+                  title="监听中"
+                  value={estimatesStats.listening}
                   valueStyle={{ color: '#fa8c16' }}
                   prefix={<BarChartOutlined />}
                 />
@@ -502,8 +555,8 @@ const Orders = () => {
             <Col xs={6} sm={6} md={6} lg={6}>
               <Card size="small">
                 <Statistic
-                  title="执行中"
-                  value={estimatesStats.executing}
+                  title="已触发"
+                  value={estimatesStats.triggered}
                   valueStyle={{ color: '#1890ff' }}
                   prefix={<BarChartOutlined />}
                 />
@@ -512,9 +565,9 @@ const Orders = () => {
             <Col xs={6} sm={6} md={6} lg={6}>
               <Card size="small">
                 <Statistic
-                  title="已完成"
-                  value={estimatesStats.completed}
-                  valueStyle={{ color: '#52c41a' }}
+                  title="触发失败"
+                  value={estimatesStats.failed}
+                  valueStyle={{ color: '#ff4d4f' }}
                   prefix={<BarChartOutlined />}
                 />
               </Card>
@@ -532,7 +585,7 @@ const Orders = () => {
                     value={estimateSymbol}
                     onChange={(val) => {
                       setEstimateSymbol(val || '');
-                      fetchEstimates(val || '');
+                      fetchAllEstimates(val || '');
                     }}
                     style={{ minWidth: 200 }}
                     allowClear
@@ -554,13 +607,14 @@ const Orders = () => {
                       </Select.Option>
                     ))}
                   </Select>
-                  <Button 
-                    icon={<ReloadOutlined />}
-                    onClick={() => fetchEstimates(estimateSymbol)}
-                    loading={loading || pricesLoading}
+                  <button 
+                    className="control-btn primary-btn orders-action-btn"
+                    onClick={() => fetchAllEstimates()}
+                    disabled={estimatesLoading || pricesLoading}
                   >
+                    <ReloadOutlined style={{ marginRight: 4 }} />
                     刷新
-                  </Button>
+                  </button>
                 </Space>
               </Col>
             </Row>
@@ -569,9 +623,9 @@ const Orders = () => {
           <Card>
             <Table
               columns={estimateColumns}
-              dataSource={estimates}
+              dataSource={estimateSymbol ? estimates.filter(e => e.symbol === estimateSymbol) : estimates}
               rowKey="id"
-              loading={loading}
+              loading={estimatesLoading}
               size="small"
               scroll={{ x: 1000 }}
               pagination={{
@@ -582,7 +636,7 @@ const Orders = () => {
               locale={{
                 emptyText: estimateSymbol ? (
                   <Empty 
-                    description={`暂无 ${estimateSymbol} 的价格监听`}
+                    description={`暂无 ${estimateSymbol} 的价格预估`}
                     image={Empty.PRESENTED_IMAGE_SIMPLE}
                   />
                 ) : (
@@ -677,13 +731,14 @@ const Orders = () => {
                       </Select.Option>
                     ))}
                   </Select>
-                  <Button 
-                    icon={<ReloadOutlined />}
+                  <button 
+                    className="control-btn primary-btn orders-action-btn"
                     onClick={() => fetchOrders(orderSymbol)}
-                    loading={ordersLoading}
+                    disabled={ordersLoading}
                   >
+                    <ReloadOutlined style={{ marginRight: 4 }} />
                     刷新
-                  </Button>
+                  </button>
                 </Space>
               </Col>
             </Row>

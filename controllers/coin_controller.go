@@ -2,49 +2,26 @@ package controllers
 
 import (
 	"net/http"
-	"time"
+	"trading_assistant/core"
 	"trading_assistant/models"
-	"trading_assistant/pkg/exchanges"
+	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/redis"
 
 	"github.com/gin-gonic/gin"
 	"github.com/sirupsen/logrus"
 )
 
-type CoinController struct{}
-
-// GetCoins 获取所有币种
-func (c *CoinController) GetCoins(ctx *gin.Context) {
-	coins, err := redis.GlobalRedisClient.GetAllCoins()
-	if err != nil {
-		logrus.Errorf("获取币种列表失败: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "获取币种列表失败",
-		})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{
-		"data":  coins,
-		"total": len(coins),
-	})
+type CoinController struct {
+	binanceClient *binance.Binance
+	marketManager *core.MarketManager
 }
 
-// GetSelectedCoins 获取已筛选的币种
-func (c *CoinController) GetSelectedCoins(ctx *gin.Context) {
-	coins, err := redis.GlobalRedisClient.GetSelectedCoins()
-	if err != nil {
-		logrus.Errorf("获取筛选币种失败: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "获取筛选币种失败",
-		})
-		return
+// NewCoinController 创建币种控制器
+func NewCoinController(binanceClient *binance.Binance, marketManager *core.MarketManager) *CoinController {
+	return &CoinController{
+		binanceClient: binanceClient,
+		marketManager: marketManager,
 	}
-
-	ctx.JSON(http.StatusOK, gin.H{
-		"data":  coins,
-		"total": len(coins),
-	})
 }
 
 // SelectCoin 筛选币种
@@ -61,120 +38,199 @@ func (c *CoinController) SelectCoin(ctx *gin.Context) {
 		return
 	}
 
-	// 获取现有币种信息
+	// 验证币种是否存在
 	coin, err := redis.GlobalRedisClient.GetCoin(req.Symbol)
 	if err != nil {
-		// 如果币种不存在，创建新的
-		coin = &models.Coin{
-			Symbol:     req.Symbol,
-			Status:     "active",
-			IsSelected: req.IsSelected,
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
-		}
-	} else {
-		// 更新筛选状态
-		coin.IsSelected = req.IsSelected
-		coin.UpdatedAt = time.Now()
-	}
-
-	err = redis.GlobalRedisClient.SetCoin(coin)
-	if err != nil {
-		logrus.Errorf("更新币种失败: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "更新币种失败",
+		ctx.JSON(http.StatusNotFound, gin.H{
+			"error": "币种不存在，请先同步币种数据",
 		})
 		return
 	}
 
-	// 如果是筛选币种，开始监听订单薄
-	if req.IsSelected && exchanges.GlobalWebSocketManager != nil {
-		err = exchanges.GlobalWebSocketManager.AddMarketDataSymbols([]string{req.Symbol})
-		if err != nil {
-			logrus.Errorf("订阅订单薄失败: %v", err)
+	// 更新选择状态（使用专门的选择状态管理）
+	var status string
+	if req.IsSelected {
+		status = models.CoinSelectionActive
+	} else {
+		status = models.CoinSelectionInactive
+	}
+
+	err = redis.GlobalRedisClient.SetCoinSelection(req.Symbol, status)
+	if err != nil {
+		logrus.Errorf("更新币种选择状态失败: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "更新币种选择状态失败",
+		})
+		return
+	}
+
+	if req.IsSelected {
+		logrus.Infof("币种 %s 已标记为选中", req.Symbol)
+	} else {
+		logrus.Infof("币种 %s 已取消选中", req.Symbol)
+	}
+
+	// 自动管理OrderBook订阅状态
+	subscriptionSynced := false
+	if c.marketManager != nil {
+		if err := c.marketManager.SyncOrderBookSubscriptions(); err != nil {
+			logrus.Errorf("同步OrderBook订阅状态失败: %v", err)
+		} else {
+			subscriptionSynced = true
+			logrus.Debugf("OrderBook订阅状态已自动同步")
 		}
-	} else if !req.IsSelected && exchanges.GlobalWebSocketManager != nil {
-		// 如果取消筛选，停止监听
-		err = exchanges.GlobalWebSocketManager.RemoveMarketDataSymbol(req.Symbol)
+	}
+
+	// 获取选择状态用于响应
+	selection, _ := redis.GlobalRedisClient.GetCoinSelection(req.Symbol)
+
+	// 返回响应
+	response := gin.H{
+		"message": "币种选择状态更新成功",
+		"data": gin.H{
+			"coin":                coin,
+			"selection":           selection,
+			"is_selected":         req.IsSelected,
+			"subscription_synced": subscriptionSynced,
+		},
+	}
+
+	// 如果启用了OrderBook管理器，返回订阅状态信息
+	if c.marketManager != nil {
+		orderBookStatus := c.marketManager.GetOrderBookSubscriptionStatus()
+		response["orderbook_subscriptions"] = gin.H{
+			"total_count": len(orderBookStatus),
+			"symbol_status": func() string {
+				if sub, exists := orderBookStatus[req.Symbol]; exists {
+					return sub.Status
+				}
+				return "not_subscribed"
+			}(),
+		}
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// SyncCoins 从交易所同步币种列表和价格数据
+func (c *CoinController) SyncCoins(ctx *gin.Context) {
+	if c.marketManager == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "市场数据管理器未初始化",
+		})
+		return
+	}
+
+	logrus.Info("开始同步币种列表和价格数据...")
+
+	// 使用统一的同步方法
+	if err := c.marketManager.SyncMarketAndPriceData(); err != nil {
+		logrus.Errorf("同步市场数据和价格数据失败: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "同步市场数据和价格数据失败: " + err.Error(),
+		})
+		return
+	}
+
+	// 获取同步后的币种数量
+	coins, err := redis.GlobalRedisClient.GetAllCoins()
+	if err != nil {
+		logrus.Errorf("获取币种数量失败: %v", err)
+		ctx.JSON(http.StatusOK, gin.H{
+			"message": "同步完成，但获取币种数量失败",
+		})
+		return
+	}
+
+	logrus.Infof("币种和价格数据同步完成，共 %d 个币种", len(coins))
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"message": "币种和价格数据同步完成",
+		"count":   len(coins),
+	})
+}
+
+// GetCoins 获取币种列表
+func (c *CoinController) GetCoins(ctx *gin.Context) {
+	// 从Redis获取所有币种
+	coins, err := redis.GlobalRedisClient.GetAllCoins()
+	if err != nil {
+		logrus.Errorf("获取币种列表失败: %v", err)
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": "获取币种列表失败",
+		})
+		return
+	}
+
+	// 根据查询参数决定返回内容
+	selectedOnly := ctx.Query("selected") == "true"
+	if selectedOnly {
+		// 使用新的选择状态管理获取选中币种
+		selectedCoins, err := redis.GlobalRedisClient.GetSelectedCoins()
 		if err != nil {
+			logrus.Errorf("获取选中币种列表失败: %v", err)
+			ctx.JSON(http.StatusInternalServerError, gin.H{
+				"error": "获取选中币种列表失败",
+			})
 			return
 		}
+		coins = selectedCoins
+	}
+
+	// 如果需要包含选择状态信息
+	includeSelection := ctx.Query("include_selection") == "true"
+	if includeSelection {
+		// 为每个币种添加选择状态信息
+		type CoinWithSelection struct {
+			*models.Coin
+			IsSelected bool `json:"is_selected"`
+		}
+
+		var coinsWithSelection []CoinWithSelection
+		for _, coin := range coins {
+			isSelected := redis.GlobalRedisClient.IsCoinSelected(coin.Symbol)
+			coinsWithSelection = append(coinsWithSelection, CoinWithSelection{
+				Coin:       coin,
+				IsSelected: isSelected,
+			})
+		}
+
+		ctx.JSON(http.StatusOK, gin.H{
+			"data":  coinsWithSelection,
+			"count": len(coinsWithSelection),
+		})
+		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"message": "币种状态更新成功",
-		"data":    coin,
+		"data":  coins,
+		"count": len(coins),
 	})
 }
 
-// SyncCoins 从交易所同步币种列表
-func (c *CoinController) SyncCoins(ctx *gin.Context) {
-	if exchanges.GlobalBinanceClient == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "Binance客户端未初始化",
-		})
-		return
-	}
-
-	// 从Binance获取期货交易对
-	coins, err := exchanges.GlobalBinanceClient.GetFuturesSymbols()
+// GetSelectedCoins 获取选中的币种列表
+func (c *CoinController) GetSelectedCoins(ctx *gin.Context) {
+	// 获取选中的币种
+	selectedCoins, err := redis.GlobalRedisClient.GetSelectedCoins()
 	if err != nil {
-		logrus.Errorf("同步币种失败: %v", err)
+		logrus.Errorf("获取选中币种列表失败: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "同步币种失败: " + err.Error(),
+			"error": "获取选中币种列表失败",
 		})
 		return
 	}
 
-	// 保存到Redis
-	savedCount := 0
-	for _, coin := range coins {
-		// 检查是否已存在
-		existingCoin, err := redis.GlobalRedisClient.GetCoin(coin.Symbol)
-		if err == nil {
-			// 保持已有的筛选状态
-			coin.IsSelected = existingCoin.IsSelected
-		}
-
-		err = redis.GlobalRedisClient.SetCoin(coin)
-		if err != nil {
-			logrus.Errorf("保存币种失败 %s: %v", coin.Symbol, err)
-		} else {
-			savedCount++
-		}
-	}
-
-	logrus.Infof("同步完成，保存了 %d 个币种", savedCount)
-
-	ctx.JSON(http.StatusOK, gin.H{
-		"message": "币种同步完成",
-		"total":   len(coins),
-		"saved":   savedCount,
-	})
-}
-
-// GetPrecision 获取币种精度信息
-func (c *CoinController) GetPrecision(ctx *gin.Context) {
-	symbol := ctx.Param("symbol")
-
-	if exchanges.GlobalBinanceClient == nil {
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "Binance客户端未初始化",
+	var result []models.CoinWithSelection
+	for i := range selectedCoins {
+		coin := selectedCoins[i]
+		result = append(result, models.CoinWithSelection{
+			Coin:       *coin,
+			IsSelected: true,
 		})
-		return
-	}
-
-	// 从Binance获取精度信息
-	coinInfo, err := exchanges.GlobalBinanceClient.GetSymbolPrecision(symbol)
-	if err != nil {
-		logrus.Errorf("获取币种精度信息失败 %s: %v", symbol, err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "获取精度信息失败: " + err.Error(),
-		})
-		return
 	}
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"data": coinInfo,
+		"data":  result,
+		"count": len(result),
 	})
 }
