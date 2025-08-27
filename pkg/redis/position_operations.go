@@ -69,3 +69,25 @@ func (c *Client) GetAllPositions() ([]*models.Position, error) {
 
 	return positions, nil
 }
+
+// ClearAllPositions 清除所有持仓信息
+func (c *Client) ClearAllPositions() error {
+	keys, err := c.rdb.Keys(c.ctx, fmt.Sprintf("%s:*", KeyPosition)).Result()
+	if err != nil {
+		return err
+	}
+
+	if len(keys) == 0 {
+		logrus.Info("没有旧的持仓数据需要清除")
+		return nil
+	}
+
+	// 批量删除所有持仓相关的key
+	err = c.rdb.Del(c.ctx, keys...).Err()
+	if err != nil {
+		return err
+	}
+
+	logrus.Infof("已清除 %d 个旧的持仓数据", len(keys))
+	return nil
+}

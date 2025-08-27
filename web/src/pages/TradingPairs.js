@@ -75,27 +75,18 @@ const TradingPairs = () => {
   const { 
     accountValue, 
     hasPosition, 
-    hasAnyPosition,
-    positionCount,
-    lastUpdate: accountLastUpdate,
-    error: accountError
+    hasAnyPosition
   } = useAccountData();
 
   const { 
     symbolEstimates, 
-    hasAnyEstimate,
-    fetchSymbolEstimates 
+    hasAnyEstimate
   } = useEstimates();
 
   // 使用全局价格数据管理
   const { 
     priceData, 
-    loading: priceLoading,
-    lastUpdate: priceLastUpdate,
-    refreshPriceData,
-    getPriceBySymbol,
-    priceCount,
-    validPriceCount
+    getPriceBySymbol
   } = usePriceData();
 
   // 初始化
@@ -234,7 +225,6 @@ const TradingPairs = () => {
       });
       message.success(`${symbol} 删除成功`);
       fetchSelectedPairs();
-      fetchSymbolEstimates();
     } catch (error) {
       message.error(`${symbol} 删除失败`);
     }
@@ -255,7 +245,10 @@ const TradingPairs = () => {
     } else if (hasPos) {
       return `存在未平仓持仓，无法删除`;
     } else if (hasEst) {
-      return `存在${symbolEstimates[symbol]}个价格监听，无法删除`;
+      const estimateCount = Array.isArray(symbolEstimates[symbol]) 
+        ? symbolEstimates[symbol].length 
+        : symbolEstimates[symbol] || 0;
+      return `存在${estimateCount}个价格监听，无法删除`;
     }
     return '';
   };
@@ -280,8 +273,8 @@ const TradingPairs = () => {
     // 设置初始目标价格
     const price = priceData[symbol];
     let initialPrice = 0;
-    if (price && price.hasValidData) {
-      initialPrice = price.currentPrice;
+    if (price && price.markPrice > 0) {
+      initialPrice = price.markPrice;
     }
     setTargetPrice(initialPrice);
     
@@ -307,7 +300,7 @@ const TradingPairs = () => {
 
   const getCurrentPrice = () => {
     const price = getPriceBySymbol(selectedTradeSymbol);
-    return price?.markPrice || price?.currentPrice || 0;
+    return price?.markPrice || 0;
   };
 
   // 统一的卡片操作处理
@@ -348,8 +341,8 @@ const TradingPairs = () => {
   // 创建交易
   const createTrade = async () => {
     try {
-      const currentPrice = getCurrentPrice();
-      if (!currentPrice || currentPrice <= 0) {
+      const markPrice = getCurrentPrice();
+      if (!markPrice || markPrice <= 0) {
         message.error('价格数据不可用，请稍后再试');
         return;
       }
@@ -361,9 +354,9 @@ const TradingPairs = () => {
       }
       
       // 根据订单类型确定价格
-      let orderPrice = currentPrice;
+      let orderPrice = markPrice;
       if (orderType === 'limit') {
-        orderPrice = targetPrice || currentPrice;
+        orderPrice = targetPrice || markPrice;
         if (!orderPrice || orderPrice <= 0) {
           message.error('请设置有效的限价价格');
           return;
@@ -392,7 +385,6 @@ const TradingPairs = () => {
       const marginModeText = marginMode === 'CROSS' ? '全仓' : '逐仓';
       message.success(`${actionText}预估价已创建 | ${orderTypeText}单 ${selectedLeverage}x杠杆 ${marginModeText} ${quantity} ${baseAsset}`);
       setTradeModalVisible(false);
-      fetchSymbolEstimates();
     } catch (error) {
       message.error('创建订单失败: ' + (error.response?.data?.error || error.message));
     }
@@ -407,7 +399,6 @@ const TradingPairs = () => {
         setRefreshing(true);
         try {
           await fetchSelectedPairs();
-          refreshPriceData();
         } catch (error) {
           console.error('刷新失败:', error);
         } finally {
@@ -750,65 +741,7 @@ const TradingPairs = () => {
         marginMode={marginMode}
         onMarginModeChange={setMarginMode}
       />
-      
-      {/* 全局状态显示 */}
-      <div style={{ 
-        position: 'fixed', 
-        bottom: '20px', 
-        right: '20px', 
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '8px',
-        zIndex: 1000
-      }}>
-        {/* 价格数据状态 */}
-        <div style={{ 
-          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-          color: 'white', 
-          padding: '8px 12px', 
-          borderRadius: '6px', 
-          fontSize: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-        }}>
-          <div style={{ 
-            width: '8px', 
-            height: '8px', 
-            borderRadius: '50%', 
-            backgroundColor: priceLoading ? '#ffa500' : (validPriceCount > 0 ? '#52c41a' : '#ff4d4f')
-          }} />
-          <span>
-            价格: {validPriceCount}/{priceCount} 
-            {priceLastUpdate && ` · ${priceLastUpdate.toLocaleTimeString()}`}
-          </span>
-        </div>
-        
-        {/* 账户数据状态 */}
-        <div style={{ 
-          backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-          color: 'white', 
-          padding: '8px 12px', 
-          borderRadius: '6px', 
-          fontSize: '12px',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '8px',
-          boxShadow: '0 2px 8px rgba(0,0,0,0.15)'
-        }}>
-          <div style={{ 
-            width: '8px', 
-            height: '8px', 
-            borderRadius: '50%', 
-            backgroundColor: accountError ? '#ff4d4f' : (accountValue ? '#52c41a' : '#ffa500')
-          }} />
-          <span>
-            账户: {positionCount}仓位 
-            {accountLastUpdate && ` · ${accountLastUpdate.toLocaleTimeString()}`}
-          </span>
-        </div>
-      </div>
+
     </div>
   );
 };

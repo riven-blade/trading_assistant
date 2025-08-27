@@ -10,6 +10,7 @@ import (
 	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
+	"trading_assistant/pkg/websocket"
 
 	"github.com/sirupsen/logrus"
 )
@@ -94,16 +95,17 @@ func (am *AccountManager) initializeData() {
 	logrus.Info("正在获取初始余额数据...")
 	am.refreshBalances()
 
+	// 清除旧的持仓数据
+	logrus.Info("清除Redis中的旧持仓数据...")
+	if err := redis.GlobalRedisClient.ClearAllPositions(); err != nil {
+		logrus.Errorf("清除旧持仓数据失败: %v", err)
+	}
+
 	// 主动获取初始持仓数据
 	logrus.Info("正在获取初始持仓数据...")
 	am.refreshPositions()
 
 	logrus.Info("账户数据初始化完成")
-
-	// 发送完成通知
-	if telegram.GlobalTelegramClient != nil {
-		telegram.GlobalTelegramClient.SendMessage("账户已连接")
-	}
 }
 
 // startUserDataStream 启动用户数据流监听
@@ -135,7 +137,7 @@ func (am *AccountManager) startUserDataStream() {
 
 // handleUserDataMessage 处理用户数据流消息
 func (am *AccountManager) handleUserDataMessage(metadata types.MetaData, data interface{}) error {
-	logrus.Infof("📨 收到用户数据流消息，类型: %s", metadata.DataType)
+	logrus.Infof("收到用户数据流消息，类型: %s", metadata.DataType)
 
 	switch metadata.DataType {
 	case "account":
@@ -163,12 +165,11 @@ func (am *AccountManager) handleAccountUpdate(accountUpdate *types.WatchAccountU
 		len(accountUpdate.Balances), len(accountUpdate.Positions))
 
 	if len(accountUpdate.Balances) > 0 {
-		// 重新获取和缓存余额分布
 		go am.refreshBalances()
 	}
 
 	if len(accountUpdate.Positions) > 0 {
-		// 重新获取和缓存持仓分布
+		logrus.Infof("检测到持仓更新，重新获取最新持仓数据")
 		go am.refreshPositions()
 	}
 	return nil
@@ -210,7 +211,8 @@ func (am *AccountManager) refreshBalances() {
 		// 尝试从缓存获取持仓盈亏
 		if redis.GlobalRedisClient != nil {
 			if allPositions, err := redis.GlobalRedisClient.GetAllPositions(); err == nil {
-				for _, pos := range allPositions {
+				for i := range allPositions {
+					pos := allPositions[i]
 					if pos.Size != 0 {
 						totalPnl += pos.UnrealizedPnl
 						marginUsed += pos.InitialMargin
@@ -234,8 +236,11 @@ func (am *AccountManager) refreshBalances() {
 	}
 	balanceSummary["positions"] = positionCount
 
-	// 净值就是总价值
-	balanceSummary["net_value"] = balanceSummary["total_value"].(float64)
+	// 计算总价值
+	usdtTotal := balanceSummary["usdt_total"].(float64)
+	balanceSummary["total_value"] = usdtTotal
+	balanceSummary["net_value"] = usdtTotal
+	balanceSummary["other_assets_value"] = 0.0 // 前端计算
 
 	// 缓存到Redis
 	if redis.GlobalRedisClient != nil {
@@ -260,6 +265,21 @@ func (am *AccountManager) refreshBalances() {
 		telegram.GlobalTelegramClient.SendMessage(message)
 	}
 
+	// 通过WebSocket广播余额更新
+	go am.broadcastBalanceUpdate(balanceSummary)
+
+	// 广播余额更新事件
+	go am.broadcastEvent("balance_update", map[string]interface{}{
+		"type":    "balance_update",
+		"message": fmt.Sprintf("余额已更新: %.2f USDT", balanceSummary["net_value"]),
+		"data": map[string]interface{}{
+			"net_value": balanceSummary["net_value"],
+			"usdt_free": balanceSummary["usdt_free"],
+			"total_pnl": balanceSummary["total_pnl"],
+			"positions": positionCount,
+		},
+	})
+
 	logrus.Info("余额数据刷新完成")
 }
 
@@ -277,6 +297,35 @@ func (am *AccountManager) refreshPositions() {
 	if err != nil {
 		logrus.Errorf("获取持仓信息失败: %v", err)
 		return
+	}
+
+	// 转成统一的model positions
+	mps := make([]*models.Position, 0, len(positions))
+
+	// 逐个存储持仓信息
+	for i := range positions {
+		position := positions[i]
+		// 转换保证金模式格式
+		marginMode := types.MarginModeCross
+		if position.MarginType == types.MarginModeIsolated {
+			marginMode = types.MarginModeIsolated
+		}
+		positionModel := &models.Position{
+			Symbol:            position.Symbol,
+			Side:              strings.ToUpper(position.Side),
+			Size:              position.Size,
+			EntryPrice:        position.EntryPrice,
+			MarkPrice:         position.MarkPrice,
+			UnrealizedPnl:     position.UnrealizedPnl,
+			Leverage:          int(position.Leverage),
+			MarginMode:        marginMode,
+			IsolatedMargin:    position.IsolatedMargin,
+			InitialMargin:     position.InitialMargin,
+			MaintenanceMargin: position.MaintenanceMargin,
+			Notional:          position.NotionalValue,
+			UpdatedAt:         time.UnixMilli(position.Timestamp),
+		}
+		mps = append(mps, positionModel)
 	}
 
 	// 缓存到Redis
@@ -298,49 +347,42 @@ func (am *AccountManager) refreshPositions() {
 		am.ensurePositionCoinsSelected(positions)
 
 		// 逐个存储持仓信息
-		for i := range positions {
-			position := positions[i]
-			// 转换保证金模式格式
-			marginMode := types.MarginModeCross
-			if position.MarginType == types.MarginModeIsolated {
-				marginMode = types.MarginModeIsolated
-			}
-
-			positionModel := &models.Position{
-				Symbol:            position.Symbol,
-				Side:              strings.ToUpper(position.Side),
-				Size:              position.Size,
-				EntryPrice:        position.EntryPrice,
-				MarkPrice:         position.MarkPrice,
-				UnrealizedPnl:     position.UnrealizedPnl,
-				Leverage:          int(position.Leverage),
-				MarginMode:        marginMode,
-				IsolatedMargin:    position.IsolatedMargin,
-				InitialMargin:     position.InitialMargin,
-				MaintenanceMargin: position.MaintenanceMargin,
-				Notional:          position.NotionalValue,
-				UpdatedAt:         time.UnixMilli(position.Timestamp),
-			}
-
-			if err := redis.GlobalRedisClient.SetPosition(positionModel); err != nil {
-				logrus.Errorf("存储持仓信息失败 %s: %v", position.Symbol, err)
+		for i := range mps {
+			modelPosition := mps[i]
+			if err = redis.GlobalRedisClient.SetPosition(modelPosition); err != nil {
+				logrus.Errorf("存储持仓信息失败 %s: %v", modelPosition.Symbol, err)
 			}
 		}
+
 	}
 
 	// 计算总盈亏
 	totalPnl := 0.0
-	for i := range positions {
-		position := positions[i]
-		totalPnl += position.UnrealizedPnl
+	for i := range mps {
+		modelPosition := mps[i]
+		totalPnl += modelPosition.UnrealizedPnl
 	}
 
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
 		message := fmt.Sprintf("持仓 %d | PNL %.4f",
-			len(positions), totalPnl)
+			len(mps), totalPnl)
 		telegram.GlobalTelegramClient.SendMessage(message)
 	}
+
+	// 通过WebSocket广播持仓更新
+	go am.broadcastAccountUpdate(mps, totalPnl)
+
+	// 广播持仓更新事件
+	go am.broadcastEvent("position_update", map[string]interface{}{
+		"type":    "position_update",
+		"message": fmt.Sprintf("持仓已更新: %d 个持仓，总盈亏 %.4f USDT", len(mps), totalPnl),
+		"data": map[string]interface{}{
+			"position_count": len(mps),
+			"total_pnl":      totalPnl,
+			"positions":      mps,
+		},
+	})
 
 	logrus.Info("持仓数据刷新完成")
 }
@@ -392,22 +434,9 @@ func (am *AccountManager) ensurePositionCoinsSelected(positions []*types.Positio
 
 // calculateBalanceSummary 计算余额汇总信息
 func (am *AccountManager) calculateBalanceSummary(account *types.Account) map[string]interface{} {
-	summary := map[string]interface{}{
-		"total_value":        0.0,
-		"usdt_total":         0.0,
-		"usdt_free":          0.0,
-		"usdt_locked":        0.0,
-		"other_assets_value": 0.0,
-		"total_pnl":          0.0,
-		"net_value":          0.0,
-		"asset_count":        0,
-		"last_updated":       time.Now().Unix(),
-		"asset_details":      []map[string]interface{}{},
-	}
-
+	// 初始化基础数据结构
 	var assetDetails []map[string]interface{}
-	otherAssetsValue := 0.0
-	assetCount := 0
+	var usdtTotal, usdtFree, usdtLocked float64
 
 	// 处理所有资产
 	for asset, total := range account.Total {
@@ -415,62 +444,46 @@ func (am *AccountManager) calculateBalanceSummary(account *types.Account) map[st
 			continue
 		}
 
+		logrus.Debugf("处理资产: %s, 余额: %f", asset, total)
+
+		// 计算可用余额和锁定余额
 		free := 0.0
 		if freeAmount, exists := account.Free[asset]; exists {
 			free = freeAmount
 		}
-
 		locked := total - free
 		if locked < 0 {
 			locked = 0
 		}
 
-		// 计算USDT价值
-		usdtValue := 0.0
-		if asset == "USDT" {
-			usdtValue = total
-		} else {
-			// 尝试从Redis获取标记价格
-			if redis.GlobalRedisClient != nil {
-				symbol := asset + "USDT"
-				if markPrice, err := redis.GlobalRedisClient.GetMarkPrice(symbol); err == nil {
-					usdtValue = total * markPrice.MarkPrice
-				}
-			}
-		}
-
-		// 创建资产详情
+		// 创建资产详情（简化字段，价格由前端处理）
 		assetDetail := map[string]interface{}{
-			"asset":      asset,
-			"amount":     total,
-			"free":       free,
-			"locked":     locked,
-			"value_usdt": usdtValue,
-			"updated_at": time.Now().Format("2006-01-02 15:04:05"),
+			"asset":          asset,
+			"wallet_balance": total,
+			"free":           free,
+			"locked":         locked,
+			"updated_at":     time.Now().Format("2006-01-02 15:04:05"),
 		}
-
 		assetDetails = append(assetDetails, assetDetail)
-		assetCount++
 
+		// 单独处理USDT数据
 		if asset == "USDT" {
-			summary["usdt_total"] = total
-			summary["usdt_free"] = free
-			summary["usdt_locked"] = locked
-		} else {
-			otherAssetsValue += usdtValue
+			usdtTotal = total
+			usdtFree = free
+			usdtLocked = locked
 		}
 	}
 
-	// 计算总价值
-	totalValue := summary["usdt_total"].(float64) + otherAssetsValue
-
-	summary["total_value"] = totalValue
-	summary["other_assets_value"] = otherAssetsValue
-	summary["net_value"] = totalValue
-	summary["asset_count"] = assetCount
-	summary["asset_details"] = assetDetails
-
-	return summary
+	// 构建返回数据（简化结构，总价值计算移到前端）
+	return map[string]interface{}{
+		"usdt_total":    usdtTotal,
+		"usdt_free":     usdtFree,
+		"usdt_locked":   usdtLocked,
+		"total_pnl":     0.0, // 盈亏数据来自持仓计算
+		"asset_count":   len(assetDetails),
+		"last_updated":  time.Now().Unix(),
+		"asset_details": assetDetails,
+	}
 }
 
 // handleOrderUpdate 处理订单更新事件
@@ -494,6 +507,21 @@ func (am *AccountManager) handleOrderUpdate(orderUpdate *types.WatchOrderUpdate)
 
 		logrus.Debugf("已清理订单相关缓存: %s", orderUpdate.Symbol)
 	}
+
+	// 广播订单更新事件
+	go am.broadcastEvent("order_update", map[string]interface{}{
+		"type":    "order_update",
+		"message": fmt.Sprintf("订单更新: %s %s %s @ %.4f", orderUpdate.Symbol, orderUpdate.Side, orderUpdate.OrderStatus, orderUpdate.OriginalPrice),
+		"data": map[string]interface{}{
+			"symbol":          orderUpdate.Symbol,
+			"side":            orderUpdate.Side,
+			"status":          orderUpdate.OrderStatus,
+			"price":           orderUpdate.OriginalPrice,
+			"quantity_filled": orderUpdate.LastQuantityFilled,
+			"execution_type":  orderUpdate.ExecutionType,
+			"order_id":        orderUpdate.OrderID,
+		},
+	})
 
 	// 发送Telegram通知
 	if telegram.GlobalTelegramClient != nil {
@@ -542,6 +570,60 @@ func (am *AccountManager) GetAccountStatus() map[string]interface{} {
 // GetBinanceClient 获取Binance客户端
 func (am *AccountManager) GetBinanceClient() *binance.Binance {
 	return am.binanceClient
+}
+
+// broadcastBalanceUpdate 广播余额更新到WebSocket客户端
+func (am *AccountManager) broadcastBalanceUpdate(balanceSummary map[string]interface{}) {
+	// 获取WebSocket管理器
+	wsManager := websocket.GetGlobalWebSocketManager()
+	if wsManager == nil {
+		return
+	}
+
+	// 广播余额数据
+	wsManager.BroadcastBalances(balanceSummary)
+	logrus.Debugf("通过WebSocket广播余额数据更新")
+}
+
+// broadcastAccountUpdate 广播账户更新到WebSocket客户端
+func (am *AccountManager) broadcastAccountUpdate(positions []*models.Position, totalPnl float64) {
+	// 获取WebSocket管理器
+	wsManager := websocket.GetGlobalWebSocketManager()
+	if wsManager == nil {
+		return
+	}
+
+	// 准备账户数据
+	accountData := map[string]interface{}{
+		"positions":     positions,
+		"totalPnl":      totalPnl,
+		"positionCount": len(positions),
+		"lastUpdate":    time.Now().Unix(),
+	}
+
+	// 广播账户数据
+	wsManager.BroadcastAccount(accountData)
+	logrus.Debugf("通过WebSocket广播账户数据更新，持仓数量: %d", len(positions))
+}
+
+// broadcastEvent 广播事件消息到WebSocket客户端
+func (am *AccountManager) broadcastEvent(eventType string, eventData map[string]interface{}) {
+	// 获取WebSocket管理器
+	wsManager := websocket.GetGlobalWebSocketManager()
+	if wsManager == nil {
+		return
+	}
+
+	// 准备事件数据
+	event := map[string]interface{}{
+		"event_type": eventType,
+		"timestamp":  time.Now().Unix(),
+		"data":       eventData,
+	}
+
+	// 广播事件
+	wsManager.BroadcastEvent(event)
+	logrus.Debugf("通过WebSocket广播事件: %s", eventType)
 }
 
 // handleUserDataReconnect 处理用户数据流WebSocket重连事件

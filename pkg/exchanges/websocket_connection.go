@@ -52,6 +52,13 @@ func NewWebSocketConnection(ctx context.Context, url string, maxReconnect int) (
 
 // connect 执行实际连接
 func (ws *WebSocketConnection) connect(ctx context.Context) error {
+	// 检查context是否已取消
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
 	dialer := websocket.Dialer{
 		HandshakeTimeout: 10 * time.Second,
 	}
@@ -83,6 +90,13 @@ func (ws *WebSocketConnection) connect(ctx context.Context) error {
 
 // reconnect 重连逻辑
 func (ws *WebSocketConnection) reconnect() {
+	// 检查context是否已取消
+	select {
+	case <-ws.ctx.Done():
+		return
+	default:
+	}
+
 	if !ws.autoReconnect || ws.reconnectCount >= ws.maxReconnect {
 		if ws.errorHandler != nil {
 			ws.errorHandler(fmt.Errorf("max reconnect attempts reached (%d), giving up", ws.maxReconnect))
@@ -103,7 +117,14 @@ func (ws *WebSocketConnection) reconnect() {
 		backoff = 30 * time.Second
 	}
 
-	time.Sleep(backoff)
+	// 使用可取消的sleep
+	select {
+	case <-ws.ctx.Done():
+		// context已取消，停止重连
+		return
+	case <-time.After(backoff):
+		// 等待完成，继续重连
+	}
 
 	if err := ws.connect(ws.ctx); err != nil {
 		if ws.errorHandler != nil {
@@ -114,7 +135,13 @@ func (ws *WebSocketConnection) reconnect() {
 		if ws.reconnectHandler != nil {
 			ws.reconnectHandler(ws.reconnectCount, fmt.Errorf("WebSocket reconnect failed, attempt %d/%d: %w", ws.reconnectCount, ws.maxReconnect, err))
 		}
-		go ws.reconnect() // 继续重连
+		// 检查context是否已取消再继续重连
+		select {
+		case <-ws.ctx.Done():
+			return
+		default:
+			go ws.reconnect() // 继续重连
+		}
 	} else {
 		// 通知重连成功
 		if ws.reconnectHandler != nil {
@@ -136,7 +163,13 @@ func (ws *WebSocketConnection) messageLoop() {
 
 		// 如果启用重连，则尝试重连
 		if ws.autoReconnect && ws.reconnectCount < ws.maxReconnect {
-			go ws.reconnect()
+			// 检查context是否已取消
+			select {
+			case <-ws.ctx.Done():
+				return
+			default:
+				go ws.reconnect()
+			}
 		}
 	}()
 
@@ -252,7 +285,13 @@ func (ws *WebSocketConnection) pingLoop() {
 					ws.mutex.Unlock()
 					// 触发重连
 					if ws.autoReconnect && ws.reconnectCount < ws.maxReconnect {
-						go ws.reconnect()
+						// 检查context是否已取消
+						select {
+						case <-ws.ctx.Done():
+							return
+						default:
+							go ws.reconnect()
+						}
 					}
 					return
 				}
@@ -299,6 +338,7 @@ func (ws *WebSocketConnection) Close() error {
 	defer ws.mutex.Unlock()
 
 	ws.isConnected = false
+	ws.autoReconnect = false // 禁用自动重连
 	if ws.cancel != nil {
 		ws.cancel()
 	}

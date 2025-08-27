@@ -1,180 +1,177 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import api from '../services/api';
+import { useState, useEffect, useCallback } from 'react';
+import WebSocketManager from '../utils/websocket';
 
 /**
- * 全局账户数据管理 Hook
- * 定时获取账户余额、持仓等信息，提供给整个应用使用
+ * 账户数据管理Hook
+ * 通过WebSocket实时获取账户余额和持仓数据
  */
 const useAccountData = () => {
+  // 余额相关状态
   const [accountValue, setAccountValue] = useState({
-    total_value: 0,
-    usdt_total: 0,
     usdt_free: 0,
-    other_assets_value: 0,
-    total_pnl: 0,
-    net_value: 0
+    usdt_margin: 0,
+    usdt_total: 0,
+    net_value: 0,
+    total_pnl: 0
   });
-
+  
+  // 资产详情状态
+  const [assetDetails, setAssetDetails] = useState([]);
+  
+  // 持仓相关状态
   const [positions, setPositions] = useState([]);
-  const [positionsMap, setPositionsMap] = useState({});
+  const [totalPnl, setTotalPnl] = useState(0);
+  const [positionCount, setPositionCount] = useState(0);
+  
+  // 通用状态
   const [loading, setLoading] = useState(true);
   const [lastUpdate, setLastUpdate] = useState(null);
   const [error, setError] = useState(null);
-  
-  // 使用ref来避免useEffect的依赖问题
-  const intervalRef = useRef(null);
+  const [wsConnected, setWsConnected] = useState(false);
 
-  // 获取账户数据（余额+持仓）
-  const fetchAccountData = useCallback(async () => {
+  // WebSocket账户数据消息处理器
+  const handleAccountMessage = useCallback((data) => {
     try {
-      setError(null);
-      
-      // 并行获取账户余额和持仓信息
-      const [balanceResponse, positionsResponse] = await Promise.all([
-        api.get('/monitor/balances'),
-        api.get('/monitor/positions')
-      ]);
-      
-      // 更新账户价值信息
-      if (balanceResponse.data?.data) {
-        setAccountValue(balanceResponse.data.data);
+      if (data.positions) {
+        setPositions(data.positions);
+        setPositionCount(data.positionCount || data.positions.length);
       }
       
-      // 更新持仓信息
-      const positionsData = positionsResponse.data.data || [];
-      setPositions(positionsData);
+      if (data.totalPnl !== undefined) {
+        setTotalPnl(data.totalPnl);
+      }
       
-      // 将持仓信息转换为按交易对和方向索引的对象
-      const positionsMap = {};
-      positionsData.forEach(position => {
-        const key = `${position.symbol}_${position.side.toLowerCase()}`;
-        positionsMap[key] = position;
-      });
-      setPositionsMap(positionsMap);
+      setLastUpdate(new Date(data.lastUpdate * 1000));
+      setLoading(false);
+      setError(null);
+    } catch (err) {
+      console.error('处理WebSocket账户数据失败:', err);
+      setError(err.message);
+    }
+  }, []);
+
+  // WebSocket余额数据消息处理器
+  const handleBalanceMessage = useCallback((data) => {
+    try {
+      // 处理账户总值数据
+      setAccountValue(data);
+      
+      // 处理资产详情数据
+      if (data.asset_details) {
+        setAssetDetails(data.asset_details);
+      }
       
       setLastUpdate(new Date());
       setLoading(false);
-      
-      console.log(`[账户更新] 余额更新完成，获取到 ${positionsData.length} 个持仓`);
+      setError(null);
     } catch (err) {
-      console.error('获取账户数据失败:', err);
+      console.error('处理WebSocket余额数据失败:', err);
       setError(err.message);
-      setLoading(false);
-      
-      // 出错时重置为默认值
-      setAccountValue({
-        total_value: 0,
-        usdt_total: 0,
-        usdt_free: 0,
-        other_assets_value: 0,
-        total_pnl: 0,
-        net_value: 0
-      });
-      setPositions([]);
-      setPositionsMap({});
     }
   }, []);
   
-  // 启动定时器
-  const startPolling = useCallback(() => {
-    // 清除现有定时器
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-    }
-    
-    // 立即获取一次数据
-    fetchAccountData();
-    
-    // 设置定时器，每秒更新一次
-    intervalRef.current = setInterval(fetchAccountData, 1000);
-    
-    console.log('[账户管理] 账户数据定时更新已启动 (1秒间隔)');
-  }, [fetchAccountData]);
+  // 获取指定仓位
+  const getPositionBySymbol = useCallback((symbol) => {
+    return positions.find(pos => pos.symbol === symbol) || null;
+  }, [positions]);
   
-  // 停止定时器
-  const stopPolling = useCallback(() => {
-    if (intervalRef.current) {
-      clearInterval(intervalRef.current);
-      intervalRef.current = null;
-      console.log('[账户管理] 账户数据定时更新已停止');
-    }
-  }, []);
-  
-  // 手动刷新
-  const refreshAccountData = useCallback(() => {
-    setLoading(true);
-    fetchAccountData();
-  }, [fetchAccountData]);
-  
-  // 为了兼容现有代码，保留单独的获取方法
-  const fetchAccountInfo = useCallback(() => refreshAccountData(), [refreshAccountData]);
-  const fetchPositions = useCallback(() => refreshAccountData(), [refreshAccountData]);
-
-  // 检查是否有指定方向的仓位
+  // 检查是否有仓位
   const hasPosition = useCallback((symbol, side) => {
-    const key = `${symbol}_${side.toLowerCase()}`;
-    return positionsMap[key] && Math.abs(positionsMap[key].size) > 0;
-  }, [positionsMap]);
+    const position = positions.find(pos => 
+      pos.symbol === symbol && 
+      pos.side.toLowerCase() === side.toLowerCase() && 
+      Math.abs(pos.size) > 0
+    );
+    return !!position;
+  }, [positions]);
 
-  // 检查交易对是否有任何仓位
+  // 检查是否有任何方向的仓位
   const hasAnyPosition = useCallback((symbol) => {
-    const longKey = `${symbol}_long`;
-    const shortKey = `${symbol}_short`;
-    return (positionsMap[longKey] && Math.abs(positionsMap[longKey].size) > 0) ||
-           (positionsMap[shortKey] && Math.abs(positionsMap[shortKey].size) > 0);
-  }, [positionsMap]);
-
-  // 组件挂载时启动，卸载时清理
-  useEffect(() => {
-    startPolling();
-    
-    return () => {
-      stopPolling();
-    };
-  }, [startPolling, stopPolling]);
+    const symbolPositions = positions.filter(pos => 
+      pos.symbol === symbol && Math.abs(pos.size) > 0
+    );
+    return symbolPositions.length > 0;
+  }, [positions]);
   
-  // 处理页面可见性变化
+  // 获取账户总价值
+  const getTotalAccountValue = useCallback(() => {
+    return accountValue.net_value || 0;
+  }, [accountValue]);
+
+  // 初始化WebSocket连接
   useEffect(() => {
-    const handleVisibilityChange = () => {
-      if (document.hidden) {
-        // 页面隐藏时停止轮询
-        stopPolling();
-      } else {
-        // 页面可见时重新开始轮询
-        startPolling();
+    let mounted = true;
+
+    // 定义连接状态回调函数
+    const handleConnect = () => {
+      if (mounted) {
+        setWsConnected(true);
+        setError(null);
       }
     };
-    
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-    };
-  }, [startPolling, stopPolling]);
 
+    const handleDisconnect = () => {
+      if (mounted) {
+        setWsConnected(false);
+        setError('WebSocket连接断开');
+      }
+    };
+
+    const initializeWebSocket = () => {
+      // 添加连接状态监听器
+      WebSocketManager.addConnectionListener(handleConnect);
+      WebSocketManager.addDisconnectionListener(handleDisconnect);
+
+      // 订阅账户和余额数据
+      WebSocketManager.subscribe('account', handleAccountMessage);
+      WebSocketManager.subscribe('balances', handleBalanceMessage);
+
+      // 检查初始连接状态
+      const status = WebSocketManager.getStatus();
+      if (mounted) {
+        setWsConnected(status.isConnected);
+        if (!status.isConnected) {
+          setError('WebSocket未连接');
+        }
+      }
+    };
+
+    initializeWebSocket();
+
+    // 清理函数
+    return () => {
+      mounted = false;
+      WebSocketManager.unsubscribe('account', handleAccountMessage);
+      WebSocketManager.unsubscribe('balances', handleBalanceMessage);
+      WebSocketManager.removeConnectionListener(handleConnect);
+      WebSocketManager.removeDisconnectionListener(handleDisconnect);
+    };
+  }, [handleAccountMessage, handleBalanceMessage]);
+  
   return {
-    // 数据
-    accountValue,        // 账户价值信息
+    // 余额数据
+    accountValue,        // 账户余额信息
+    assetDetails,        // 资产详情列表
+    
+    // 持仓数据
     positions,           // 持仓列表
-    positionsMap,        // 持仓映射 {symbol_side: position}
+    totalPnl,            // 总盈亏
+    positionCount,       // 持仓数量
+    
+    // 通用状态
     loading,             // 加载状态
     lastUpdate,          // 最后更新时间
     error,               // 错误信息
     
+    // 连接状态
+    wsConnected,         // WebSocket连接状态
+    connectionMode: 'websocket', // 连接模式（固定为WebSocket）
+    
     // 方法
-    refreshAccountData,  // 手动刷新
-    startPolling,        // 启动定时器
-    stopPolling,         // 停止定时器
-    hasPosition,         // 检查是否有指定方向的仓位
-    hasAnyPosition,      // 检查交易对是否有任何仓位
-    
-    // 为了兼容现有代码，保留旧的方法名
-    fetchAccountInfo,    // 兼容旧代码
-    fetchPositions,      // 兼容旧代码
-    
-    // 统计信息
-    positionCount: positions.length,
-    activePositionCount: positions.filter(p => Math.abs(p.size) > 0).length
+    getPositionBySymbol, // 获取指定仓位
+    hasPosition,         // 检查是否有仓位
+    hasAnyPosition,      // 检查是否有任何方向的仓位
+    getTotalAccountValue, // 获取账户总价值
   };
 };
 

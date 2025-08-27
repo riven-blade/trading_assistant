@@ -15,89 +15,6 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// calculateBalanceSummary 计算余额汇总信息
-func calculateBalanceSummary(account *types.Account) map[string]interface{} {
-	summary := map[string]interface{}{
-		"total_value":        0.0,
-		"usdt_total":         0.0,
-		"usdt_free":          0.0,
-		"usdt_locked":        0.0,
-		"other_assets_value": 0.0,
-		"total_pnl":          0.0,
-		"net_value":          0.0,
-		"asset_count":        0,
-		"last_updated":       time.Now().Unix(),
-		"asset_details":      []map[string]interface{}{},
-	}
-
-	var assetDetails []map[string]interface{}
-	otherAssetsValue := 0.0
-	assetCount := 0
-
-	// 处理所有资产
-	for asset, total := range account.Total {
-		if total <= 0.000001 { // 忽略极小余额
-			continue
-		}
-
-		free := 0.0
-		if freeAmount, exists := account.Free[asset]; exists {
-			free = freeAmount
-		}
-
-		locked := total - free
-		if locked < 0 {
-			locked = 0
-		}
-
-		// 计算USDT价值（非USDT资产使用标记价格转换）
-		usdtValue := 0.0
-		if asset == "USDT" {
-			usdtValue = total
-		} else {
-			// 尝试从Redis获取标记价格
-			if redis.GlobalRedisClient != nil {
-				symbol := asset + "USDT"
-				if markPrice, err := redis.GlobalRedisClient.GetMarkPrice(symbol); err == nil {
-					usdtValue = total * markPrice.MarkPrice
-				}
-			}
-		}
-
-		// 创建资产详情
-		assetDetail := map[string]interface{}{
-			"asset":      asset,
-			"amount":     total,
-			"free":       free,
-			"locked":     locked,
-			"value_usdt": usdtValue,
-			"updated_at": time.Now().Format("2006-01-02 15:04:05"),
-		}
-
-		assetDetails = append(assetDetails, assetDetail)
-		assetCount++
-
-		if asset == "USDT" {
-			summary["usdt_total"] = total
-			summary["usdt_free"] = free
-			summary["usdt_locked"] = locked
-		} else {
-			otherAssetsValue += usdtValue
-		}
-	}
-
-	// 计算总价值
-	totalValue := summary["usdt_total"].(float64) + otherAssetsValue
-
-	summary["total_value"] = totalValue
-	summary["other_assets_value"] = otherAssetsValue
-	summary["net_value"] = totalValue
-	summary["asset_count"] = assetCount
-	summary["asset_details"] = assetDetails
-
-	return summary
-}
-
 type MonitorController struct {
 	binanceClient *binance.Binance
 }
@@ -107,31 +24,6 @@ func NewMonitorController(binanceClient *binance.Binance) *MonitorController {
 	return &MonitorController{
 		binanceClient: binanceClient,
 	}
-}
-
-// convertOrders 转换订单格式
-func (m *MonitorController) convertOrders(exchangeOrders []*types.Order) []*models.Order {
-	orders := make([]*models.Order, 0, len(exchangeOrders))
-
-	for _, exOrder := range exchangeOrders {
-		order := &models.Order{
-			ID:           exOrder.ID,
-			Symbol:       exOrder.Symbol,
-			Side:         strings.ToUpper(exOrder.Side),
-			PositionSide: strings.ToUpper(exOrder.PositionSide), // 关键修复：添加持仓方向
-			Type:         strings.ToUpper(exOrder.Type),
-			Quantity:     exOrder.Amount,
-			ExecutedQty:  exOrder.Filled,
-			Price:        exOrder.Price,
-			Status:       strings.ToUpper(exOrder.Status),
-			ExchangeID:   exOrder.ID,
-			CreatedAt:    time.UnixMilli(exOrder.Timestamp),
-			UpdatedAt:    time.UnixMilli(exOrder.LastTradeTimestamp),
-		}
-		orders = append(orders, order)
-	}
-
-	return orders
 }
 
 // GetOrders 获取订单信息
@@ -192,160 +84,29 @@ func (m *MonitorController) GetOrders(ctx *gin.Context) {
 	})
 }
 
-// GetPositions 获取持仓信息
-func (m *MonitorController) GetPositions(ctx *gin.Context) {
-	// 优先从Redis缓存获取持仓数据
-	if redis.GlobalRedisClient != nil {
-		var cachedPositions []*types.Position
-		cacheKey := redis.CacheKeyPositions
-		if err := redis.GlobalRedisClient.GetCache(cacheKey, &cachedPositions); err == nil {
-			// 转换为前端需要的格式
-			positions := make([]*models.Position, 0, len(cachedPositions))
-			for i := range cachedPositions {
-				pos := cachedPositions[i]
+// convertOrders 转换订单格式
+func (m *MonitorController) convertOrders(exchangeOrders []*types.Order) []*models.Order {
+	orders := make([]*models.Order, 0, len(exchangeOrders))
 
-				// 转换保证金模式格式
-				marginMode := types.MarginModeCross
-				if pos.MarginType == types.MarginModeIsolated {
-					marginMode = types.MarginModeIsolated
-				}
-
-				position := &models.Position{
-					Symbol:            pos.Symbol,
-					Side:              strings.ToUpper(pos.Side),
-					Size:              pos.Size,
-					EntryPrice:        pos.EntryPrice,
-					MarkPrice:         pos.MarkPrice,
-					UnrealizedPnl:     pos.UnrealizedPnl,
-					Leverage:          int(pos.Leverage),
-					MarginMode:        marginMode,
-					IsolatedMargin:    pos.IsolatedMargin,
-					InitialMargin:     pos.InitialMargin,
-					MaintenanceMargin: pos.MaintenanceMargin,
-					Notional:          pos.NotionalValue,
-					UpdatedAt:         time.UnixMilli(pos.Timestamp),
-				}
-				positions = append(positions, position)
-			}
-
-			ctx.JSON(http.StatusOK, gin.H{
-				"data":   positions,
-				"cached": true,
-				"source": "redis_cache",
-			})
-			return
+	for _, exOrder := range exchangeOrders {
+		order := &models.Order{
+			ID:           exOrder.ID,
+			Symbol:       exOrder.Symbol,
+			Side:         strings.ToUpper(exOrder.Side),
+			PositionSide: strings.ToUpper(exOrder.PositionSide), // 关键修复：添加持仓方向
+			Type:         strings.ToUpper(exOrder.Type),
+			Quantity:     exOrder.Amount,
+			ExecutedQty:  exOrder.Filled,
+			Price:        exOrder.Price,
+			Status:       strings.ToUpper(exOrder.Status),
+			ExchangeID:   exOrder.ID,
+			CreatedAt:    time.UnixMilli(exOrder.Timestamp),
+			UpdatedAt:    time.UnixMilli(exOrder.LastTradeTimestamp),
 		}
-
-		// 尝试从Redis持仓操作中获取
-		if allPositions, err := redis.GlobalRedisClient.GetAllPositions(); err == nil {
-			ctx.JSON(http.StatusOK, gin.H{
-				"data":   allPositions,
-				"cached": true,
-				"source": "redis_positions",
-			})
-			return
-		}
+		orders = append(orders, order)
 	}
 
-	// 缓存中没有数据，返回空数据
-	ctx.JSON(http.StatusOK, gin.H{
-		"data":    []*models.Position{},
-		"cached":  false,
-		"source":  "no_cache",
-		"message": "持仓数据不在缓存中，请等待自动刷新",
-	})
-}
-
-// GetBalances 获取余额信息
-func (m *MonitorController) GetBalances(ctx *gin.Context) {
-	// 优先从Redis获取实时余额汇总
-	var balanceSummary interface{}
-	if redis.GlobalRedisClient != nil {
-		if err := redis.GlobalRedisClient.GetBalancesRealtime(&balanceSummary); err == nil {
-			ctx.JSON(http.StatusOK, gin.H{
-				"data":   balanceSummary,
-				"cached": true,
-				"source": "realtime_cache",
-			})
-			return
-		}
-	}
-
-	// 尝试从普通缓存获取详细余额
-	if redis.GlobalRedisClient != nil {
-		var cachedAccount *types.Account
-		cacheKey := redis.CacheKeyBalances
-		if err := redis.GlobalRedisClient.GetCache(cacheKey, &cachedAccount); err == nil {
-			// 计算余额汇总
-			summary := calculateBalanceSummary(cachedAccount)
-			ctx.JSON(http.StatusOK, gin.H{
-				"data":   summary,
-				"cached": true,
-				"source": "detailed_cache",
-			})
-			return
-		}
-	}
-
-	// 缓存中没有数据，返回空数据
-	ctx.JSON(http.StatusOK, gin.H{
-		"data": map[string]interface{}{
-			"total_value":        0.0,
-			"usdt_total":         0.0,
-			"usdt_free":          0.0,
-			"other_assets_value": 0.0,
-			"total_pnl":          0.0,
-			"net_value":          0.0,
-		},
-		"cached":  false,
-		"source":  "no_cache",
-		"message": "余额数据不在缓存中，请等待自动刷新",
-	})
-}
-
-// GetOrderbook 获取订单簿数据
-func (m *MonitorController) GetOrderbook(ctx *gin.Context) {
-	symbol := ctx.Param("symbol")
-	if symbol == "" {
-		ctx.JSON(http.StatusBadRequest, gin.H{
-			"error": "交易对参数不能为空",
-		})
-		return
-	}
-
-	// 标准化交易对格式
-	symbol = strings.ToUpper(symbol)
-
-	// 从Redis获取订单簿数据
-	orderbook, err := redis.GlobalRedisClient.GetOrderBook(symbol)
-	if err != nil {
-		ctx.JSON(http.StatusNotFound, gin.H{
-			"error":  "未找到订单簿数据",
-			"symbol": symbol,
-			"detail": err.Error(),
-		})
-		return
-	}
-
-	// 检查数据时效性
-	if orderbook.Timestamp > 0 {
-		now := time.Now().UnixMilli()
-		age := now - orderbook.Timestamp
-
-		// 如果数据超过30秒，标记为过时
-		if age > 30000 {
-			ctx.JSON(http.StatusOK, gin.H{
-				"data":   orderbook,
-				"stale":  true,
-				"age_ms": age,
-			})
-			return
-		}
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{
-		"data": orderbook,
-	})
+	return orders
 }
 
 // CancelOrder 取消订单

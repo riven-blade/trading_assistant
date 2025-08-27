@@ -11,6 +11,7 @@ import ChartToolbar from '../components/Chart/ChartToolbar';
 import IndicatorPanel from '../components/Chart/IndicatorPanel';
 import { getIndicatorInfo } from '../utils/indicatorUtils';
 import useEstimates from '../hooks/useEstimates';
+import useAccountData from '../hooks/useAccountData';
 import api from '../services/api';
 import '../styles/chart-hide-toolbar.css';
 
@@ -167,11 +168,7 @@ const ChartPage = () => {
   const [loading, setLoading] = useState(false);
   const [klineData, setKlineData] = useState([]);
   
-  // 仓位相关状态
-  const [positions, setPositions] = useState([]);
-  const [positionsLoading, setPositionsLoading] = useState(false);
-  
-  // 指标相关状态 - 简单的开关管理
+  // 指标相关状态
   const [selectedIndicators, setSelectedIndicators] = useState([]);
   
   // UI状态管理
@@ -188,7 +185,10 @@ const ChartPage = () => {
   const [chartInitialized, setChartInitialized] = useState(false);
 
   // 价格监听功能
-  const { estimates, getEstimatesBySymbol, hasAnyEstimate, toggleEstimate } = useEstimates();
+  const { symbolEstimates, hasAnyEstimate, toggleEstimate } = useEstimates();
+  
+  // 账户数据（包含持仓信息）
+  const { positions, loading: positionsLoading } = useAccountData();
   const [currentSymbolEstimates, setCurrentSymbolEstimates] = useState([]);
   const [currentSymbolPositions, setCurrentSymbolPositions] = useState([]);
   const priceLineIds = useRef(new Set()); // 跟踪已绘制的价格线
@@ -275,29 +275,7 @@ const ChartPage = () => {
     }
   }, []);
 
-  // 获取仓位数据
-  const fetchPositions = useCallback(async () => {
-    if (!isMountedRef.current) return;
-    
-    try {
-      setPositionsLoading(true);
-      const response = await api.get('/monitor/positions');
-      const positionsData = response.data.data || [];
-      
-      if (!isMountedRef.current) return;
-      
-      setPositions(positionsData);
-    } catch (error) {
-      console.error('获取仓位数据失败:', error);
-      if (isMountedRef.current) {
-        setPositions([]);
-      }
-    } finally {
-      if (isMountedRef.current) {
-        setPositionsLoading(false);
-      }
-    }
-  }, []);
+
 
   // 获取当前币种的仓位数据
   const fetchCurrentSymbolPositions = useCallback(async () => {
@@ -321,7 +299,7 @@ const ChartPage = () => {
     }
   }, [selectedCoin, positions]);
 
-  // 获取当前币种的价格监听数据（从全局estimates数据中过滤）
+  // 获取当前币种的价格监听数据（只获取listening状态的监听）
   const fetchCurrentSymbolEstimates = useCallback(() => {
     if (!selectedCoin) {
       setCurrentSymbolEstimates([]);
@@ -329,11 +307,11 @@ const ChartPage = () => {
     }
     
     try {
-      // 从全局estimates数据中过滤当前交易对的数据
-      const symbolEstimates = getEstimatesBySymbol(selectedCoin);
+      // 直接从symbolEstimates中获取当前币种的预估数据
+      const symbolEstimateList = symbolEstimates[selectedCoin] || [];
       
       // 过滤掉无效的测试数据
-      const validEstimates = (symbolEstimates || []).filter(estimate => 
+      const validEstimates = symbolEstimateList.filter(estimate => 
         estimate.id && 
         estimate.id.length > 10 && // 确保ID不是简单的测试ID
         !estimate.id.startsWith('test-')
@@ -346,12 +324,12 @@ const ChartPage = () => {
       console.error('获取价格监听数据失败:', error);
       setCurrentSymbolEstimates([]);
     }
-  }, [selectedCoin, getEstimatesBySymbol]);
+  }, [selectedCoin, symbolEstimates]);
 
-  // 监听全局estimates数据变化
+  // 监听全局symbolEstimates数据变化
   useEffect(() => {
     fetchCurrentSymbolEstimates();
-  }, [estimates, fetchCurrentSymbolEstimates]);
+  }, [symbolEstimates, fetchCurrentSymbolEstimates]);
 
   // 手动刷新K线数据
   const handleRefresh = useCallback(async () => {
@@ -369,8 +347,7 @@ const ChartPage = () => {
             interval: selectedInterval,
             limit: 1000
           }
-        }),
-        fetchPositions() // 刷新仓位数据
+        })
       ]);
       
       const data = klineResponse.data.data || [];
@@ -395,7 +372,7 @@ const ChartPage = () => {
       }
     }
     setLoading(false);
-  }, [selectedCoin, selectedInterval, fetchPositions, fetchCurrentSymbolEstimates]);
+  }, [selectedCoin, selectedInterval, fetchCurrentSymbolEstimates]);
 
   // 统一绘制所有覆盖层（价格线和仓位线）
   const drawAllOverlays = useCallback(() => {
@@ -968,8 +945,7 @@ const ChartPage = () => {
   // 组件初始化
   useEffect(() => {
     fetchSelectedCoins();
-    fetchPositions();
-  }, [fetchSelectedCoins, fetchPositions]);
+  }, [fetchSelectedCoins]);
 
   // 当选择的币种变化时，获取对应的价格监听数据和仓位数据
   useEffect(() => {
@@ -1094,10 +1070,8 @@ const ChartPage = () => {
           disabledEstimatesCount={currentSymbolEstimates.filter(e => !e.enabled).length}
           currentSymbolEstimates={currentSymbolEstimates}
           onToggleEstimate={async (id, enabled) => {
-            const success = await toggleEstimate(id, enabled);
-            if (success) {
-              fetchCurrentSymbolEstimates();
-            }
+            await toggleEstimate(id, enabled);
+            // WebSocket会自动推送更新的数据
           }}
           positions={currentSymbolPositions}
           isMobile={isMobile}

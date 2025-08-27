@@ -32,7 +32,7 @@ const { Text } = Typography;
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
-  const [currentPrices, setCurrentPrices] = useState({});
+  const [markPrices, setMarkPrices] = useState({});
   const [pricesLoading, setPricesLoading] = useState(false);
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('estimates');
@@ -66,7 +66,7 @@ const Orders = () => {
       });
       
       setEstimates(sortedEstimates);
-      console.log(`[订单页面] 获取到 ${estimatesData.length} 条价格预估数据`);
+
     } catch (error) {
       console.error('获取价格预估数据失败:', error);
       if (isMountedRef.current) {
@@ -155,10 +155,10 @@ const Orders = () => {
       const pricesMap = {};
       symbols.forEach(symbol => {
         const priceData = getPriceBySymbol(symbol);
-        pricesMap[symbol] = priceData?.markPrice || priceData?.currentPrice || 0;
+        pricesMap[symbol] = priceData?.markPrice || 0;
       });
       
-      setCurrentPrices(pricesMap);
+      setMarkPrices(pricesMap);
     } catch (error) {
       console.error('获取价格数据失败:', error);
     } finally {
@@ -263,7 +263,7 @@ const Orders = () => {
       dataIndex: 'target_price',
       key: 'target_price',
       width: 100,
-      render: (price) => <Text strong>${price.toFixed(4)}</Text>
+      render: (price) => <Text strong>${(price || 0).toFixed(4)}</Text>
     },
     {
       title: '当前价格',
@@ -271,19 +271,19 @@ const Orders = () => {
       key: 'current_price',
       width: 120,
       render: (symbol, record) => {
-        const currentPrice = currentPrices[symbol] || 0;
+        const markPrice = markPrices[symbol] || 0;
         const targetPrice = record.target_price || 0;
         
         // 计算百分比差异
         let percentage = 0;
-        if (currentPrice > 0 && targetPrice > 0) {
-          percentage = ((currentPrice - targetPrice) / targetPrice * 100);
+        if (markPrice > 0 && targetPrice > 0) {
+          percentage = ((markPrice - targetPrice) / targetPrice * 100);
         }
         
         return (
           <div>
             <Text strong style={{ color: '#1890ff', display: 'block' }}>
-              ${currentPrice.toFixed(4)}
+              ${(markPrice || 0).toFixed(4)}
             </Text>
             {percentage !== 0 && (
               <Text 
@@ -293,7 +293,7 @@ const Orders = () => {
                   fontWeight: 500
                 }}
               >
-                {percentage >= 0 ? '+' : ''}{percentage.toFixed(2)}%
+                {percentage >= 0 ? '+' : ''}{(percentage || 0).toFixed(2)}%
               </Text>
             )}
           </div>
@@ -307,7 +307,7 @@ const Orders = () => {
       width: 120,
       render: (quantity, record) => {
         const baseAsset = record.symbol?.replace('USDT', '') || '';
-        return <Text>{quantity?.toFixed(6)} {baseAsset}</Text>
+        return <Text>{(quantity || 0).toFixed(6)} {baseAsset}</Text>
       }
     },
     {
@@ -317,7 +317,7 @@ const Orders = () => {
       width: 120,
       render: (targetPrice, record) => {
         const estimatedAmount = (record.quantity || 0) * (targetPrice || 0);
-        return <Text>${estimatedAmount.toFixed(2)} USDT</Text>
+        return <Text>${(estimatedAmount || 0).toFixed(2)} USDT</Text>
       }
     },
     {
@@ -490,21 +490,21 @@ const Orders = () => {
       dataIndex: 'quantity',
       key: 'quantity',
       width: 120,
-      render: (quantity) => <Text>{quantity.toFixed(6)}</Text>
+      render: (quantity) => <Text>{(quantity || 0).toFixed(6)}</Text>
     },
     {
       title: '已成交',
       dataIndex: 'executed_qty',
       key: 'executed_qty',
       width: 120,
-      render: (executedQty) => <Text>{executedQty.toFixed(6)}</Text>
+      render: (executedQty) => <Text>{(executedQty || 0).toFixed(6)}</Text>
     },
     {
       title: '价格',
       dataIndex: 'price',
       key: 'price',
       width: 100,
-      render: (price) => <Text strong>${price.toFixed(4)}</Text>
+      render: (price) => <Text strong>${(price || 0).toFixed(4)}</Text>
     },
     {
       title: '状态',
@@ -605,255 +605,264 @@ const Orders = () => {
         extra={headerExtra}
       />
 
-      <Tabs activeKey={activeTab} onChange={setActiveTab}>
-        <Tabs.TabPane 
-          tab={
-            <Badge count={estimatesStats.listening} offset={[10, 0]}>
-              <span>价格预估</span>
-            </Badge>
-          } 
-          key="estimates"
-        >
-          {/* 统计信息 */}
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="总计"
-                  value={estimatesStats.total}
-                  prefix={<LineChartOutlined style={{ color: '#1890ff' }} />}
-                />
-              </Card>
-            </Col>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="监听中"
-                  value={estimatesStats.listening}
-                  valueStyle={{ color: '#fa8c16' }}
-                  prefix={<BarChartOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="已触发"
-                  value={estimatesStats.triggered}
-                  valueStyle={{ color: '#1890ff' }}
-                  prefix={<BarChartOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="触发失败"
-                  value={estimatesStats.failed}
-                  valueStyle={{ color: '#ff4d4f' }}
-                  prefix={<BarChartOutlined />}
-                />
-              </Card>
-            </Col>
-          </Row>
+      <Tabs 
+        activeKey={activeTab} 
+        onChange={setActiveTab}
+        items={[
+          {
+            key: 'estimates',
+            label: (
+              <Badge count={estimatesStats.listening} offset={[10, 0]}>
+                <span>价格预估</span>
+              </Badge>
+            ),
+            children: (
+              <>
+                {/* 统计信息 */}
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="总计"
+                        value={estimatesStats.total}
+                        prefix={<LineChartOutlined style={{ color: '#1890ff' }} />}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="监听中"
+                        value={estimatesStats.listening}
+                        valueStyle={{ color: '#fa8c16' }}
+                        prefix={<BarChartOutlined />}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="已触发"
+                        value={estimatesStats.triggered}
+                        valueStyle={{ color: '#1890ff' }}
+                        prefix={<BarChartOutlined />}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="触发失败"
+                        value={estimatesStats.failed}
+                        valueStyle={{ color: '#ff4d4f' }}
+                        prefix={<BarChartOutlined />}
+                      />
+                    </Card>
+                  </Col>
+                </Row>
 
-          {/* 筛选器 */}
-          <Card style={{ marginBottom: 16 }}>
-            <Row gutter={16} align="middle">
-              <Col flex="auto">
-                <Space size="middle" style={{ width: '100%' }}>
-                  <Text strong>交易对筛选:</Text>
-                  <Select
-                    placeholder="选择交易对"
-                    value={estimateSymbol}
-                    onChange={(val) => {
-                      setEstimateSymbol(val || '');
-                      fetchAllEstimates(val || '');
-                    }}
-                    style={{ minWidth: 200 }}
-                    allowClear
-                  >
-                    <Select.Option value="">
-                      <Space>
-                        <span>📊</span>
-                        <span>所有价格监听</span>
+                {/* 筛选器 */}
+                <Card style={{ marginBottom: 16 }}>
+                  <Row gutter={16} align="middle">
+                    <Col flex="auto">
+                      <Space size="middle" style={{ width: '100%' }}>
+                        <Text strong>交易对筛选:</Text>
+                        <Select
+                          placeholder="选择交易对"
+                          value={estimateSymbol}
+                          onChange={(val) => {
+                            setEstimateSymbol(val || '');
+                            fetchAllEstimates(val || '');
+                          }}
+                          style={{ minWidth: 200 }}
+                          allowClear
+                        >
+                          <Select.Option value="">
+                            <Space>
+                              <span>📊</span>
+                              <span>所有价格监听</span>
+                            </Space>
+                          </Select.Option>
+                          {selectedCoins.map(option => (
+                            <Select.Option key={option.symbol} value={option.symbol}>
+                              <Space>
+                                <span>📈</span>
+                                <Text strong style={{ color: '#1890ff' }}>
+                                  {option.symbol}
+                                </Text>
+                              </Space>
+                            </Select.Option>
+                          ))}
+                        </Select>
+                        <button 
+                          className="control-btn primary-btn orders-action-btn"
+                          onClick={() => fetchAllEstimates()}
+                          disabled={estimatesLoading || pricesLoading}
+                        >
+                          <ReloadOutlined style={{ marginRight: 4 }} />
+                          刷新
+                        </button>
                       </Space>
-                    </Select.Option>
-                    {selectedCoins.map(option => (
-                      <Select.Option key={option.symbol} value={option.symbol}>
-                        <Space>
-                          <span>📈</span>
-                          <Text strong style={{ color: '#1890ff' }}>
-                            {option.symbol}
-                          </Text>
-                        </Space>
-                      </Select.Option>
-                    ))}
-                  </Select>
-                  <button 
-                    className="control-btn primary-btn orders-action-btn"
-                    onClick={() => fetchAllEstimates()}
-                    disabled={estimatesLoading || pricesLoading}
-                  >
-                    <ReloadOutlined style={{ marginRight: 4 }} />
-                    刷新
-                  </button>
-                </Space>
-              </Col>
-            </Row>
-          </Card>
+                    </Col>
+                  </Row>
+                </Card>
 
-          <Card>
-            <Table
-              columns={estimateColumns}
-              dataSource={estimateSymbol ? estimates.filter(e => e.symbol === estimateSymbol) : estimates}
-              rowKey="id"
-              loading={estimatesLoading}
-              size="small"
-              scroll={{ x: 1000 }}
-              pagination={{
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条记录`,
-              }}
-              locale={{
-                emptyText: estimateSymbol ? (
-                  <Empty 
-                    description={`暂无 ${estimateSymbol} 的价格预估`}
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  />
-                ) : (
-                  <Empty description="暂无价格预估" />
-                )
-              }}
-            />
-          </Card>
-        </Tabs.TabPane>
-
-        <Tabs.TabPane 
-          tab={
-            <Badge count={ordersStats.newOrders} offset={[10, 0]}>
-              <span>订单状态</span>
-            </Badge>
-          } 
-          key="orders"
-        >
-          {/* 统计信息 */}
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="总计"
-                  value={ordersStats.total}
-                  prefix={<LineChartOutlined style={{ color: '#1890ff' }} />}
-                />
-              </Card>
-            </Col>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="新订单"
-                  value={ordersStats.newOrders}
-                  valueStyle={{ color: '#fa8c16' }}
-                  prefix={<BarChartOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="已成交"
-                  value={ordersStats.filled}
-                  valueStyle={{ color: '#52c41a' }}
-                  prefix={<BarChartOutlined />}
-                />
-              </Card>
-            </Col>
-            <Col xs={6} sm={6} md={6} lg={6}>
-              <Card size="small">
-                <Statistic
-                  title="已取消"
-                  value={ordersStats.cancelled}
-                  valueStyle={{ color: '#ff4d4f' }}
-                  prefix={<BarChartOutlined />}
-                />
-              </Card>
-            </Col>
-          </Row>
-
-          {/* 筛选器 */}
-          <Card style={{ marginBottom: 16 }}>
-            <Row gutter={16} align="middle">
-              <Col flex="auto">
-                <Space size="middle" style={{ width: '100%' }}>
-                  <Text strong>交易对筛选:</Text>
-                  <Select
-                    placeholder="选择交易对"
-                    value={orderSymbol}
-                    onChange={(val) => {
-                      setOrderSymbol(val || '');
-                      fetchOrders(val || '');
+                <Card>
+                  <Table
+                    columns={estimateColumns}
+                    dataSource={estimateSymbol ? estimates.filter(e => e.symbol === estimateSymbol) : estimates}
+                    rowKey="id"
+                    loading={estimatesLoading}
+                    size="small"
+                    scroll={{ x: 1000 }}
+                    pagination={{
+                      showSizeChanger: true,
+                      showQuickJumper: true,
+                      showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条记录`,
                     }}
-                    style={{ minWidth: 200 }}
-                    allowClear
-                  >
-                    <Select.Option value="">
-                      <Space>
-                        <span>🔄</span>
-                        <span>所有活跃订单</span>
-                      </Space>
-                    </Select.Option>
-                    {selectedCoins.map(option => (
-                      <Select.Option key={option.symbol} value={option.symbol}>
-                        <Space>
-                          <span>📈</span>
-                          <Text strong style={{ color: '#1890ff' }}>
-                            {option.symbol}
-                          </Text>
-                        </Space>
-                      </Select.Option>
-                    ))}
-                  </Select>
-                  <button 
-                    className="control-btn primary-btn orders-action-btn"
-                    onClick={() => fetchOrders(orderSymbol)}
-                    disabled={ordersLoading}
-                  >
-                    <ReloadOutlined style={{ marginRight: 4 }} />
-                    刷新
-                  </button>
-                </Space>
-              </Col>
-            </Row>
-          </Card>
-
-          <Card>
-            <Table
-              columns={orderColumns}
-              dataSource={orders}
-              rowKey="id"
-              loading={ordersLoading}
-              size="small"
-              scroll={{ x: 1200 }}
-              pagination={{
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条记录`,
-              }}
-              locale={{
-                emptyText: orderSymbol ? (
-                  <Empty 
-                    description={`暂无 ${orderSymbol} 的历史订单`}
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    locale={{
+                      emptyText: estimateSymbol ? (
+                        <Empty 
+                          description={`暂无 ${estimateSymbol} 的价格预估`}
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        />
+                      ) : (
+                        <Empty description="暂无价格预估" />
+                      )
+                    }}
                   />
-                ) : (
-                  <Empty description="暂无历史订单" />
-                )
-              }}
-            />
-          </Card>
-        </Tabs.TabPane>
-      </Tabs>
+                </Card>
+              </>
+            )
+          },
+          {
+            key: 'orders',
+            label: (
+              <Badge count={ordersStats.newOrders} offset={[10, 0]}>
+                <span>订单状态</span>
+              </Badge>
+            ),
+            children: (
+              <>
+                {/* 统计信息 */}
+                <Row gutter={16} style={{ marginBottom: 16 }}>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="总计"
+                        value={ordersStats.total}
+                        prefix={<LineChartOutlined style={{ color: '#1890ff' }} />}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="新订单"
+                        value={ordersStats.newOrders}
+                        valueStyle={{ color: '#fa8c16' }}
+                        prefix={<BarChartOutlined />}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="已成交"
+                        value={ordersStats.filled}
+                        valueStyle={{ color: '#52c41a' }}
+                        prefix={<BarChartOutlined />}
+                      />
+                    </Card>
+                  </Col>
+                  <Col xs={6} sm={6} md={6} lg={6}>
+                    <Card size="small">
+                      <Statistic
+                        title="已取消"
+                        value={ordersStats.cancelled}
+                        valueStyle={{ color: '#ff4d4f' }}
+                        prefix={<BarChartOutlined />}
+                      />
+                    </Card>
+                  </Col>
+                </Row>
+
+                {/* 筛选器 */}
+                <Card style={{ marginBottom: 16 }}>
+                  <Row gutter={16} align="middle">
+                    <Col flex="auto">
+                      <Space size="middle" style={{ width: '100%' }}>
+                        <Text strong>交易对筛选:</Text>
+                        <Select
+                          placeholder="选择交易对"
+                          value={orderSymbol}
+                          onChange={(val) => {
+                            setOrderSymbol(val || '');
+                            fetchOrders(val || '');
+                          }}
+                          style={{ minWidth: 200 }}
+                          allowClear
+                        >
+                          <Select.Option value="">
+                            <Space>
+                              <span>🔄</span>
+                              <span>所有活跃订单</span>
+                            </Space>
+                          </Select.Option>
+                          {selectedCoins.map(option => (
+                            <Select.Option key={option.symbol} value={option.symbol}>
+                              <Space>
+                                <span>📈</span>
+                                <Text strong style={{ color: '#1890ff' }}>
+                                  {option.symbol}
+                                </Text>
+                              </Space>
+                            </Select.Option>
+                          ))}
+                        </Select>
+                        <button 
+                          className="control-btn primary-btn orders-action-btn"
+                          onClick={() => fetchOrders(orderSymbol)}
+                          disabled={ordersLoading}
+                        >
+                          <ReloadOutlined style={{ marginRight: 4 }} />
+                          刷新
+                        </button>
+                      </Space>
+                    </Col>
+                  </Row>
+                </Card>
+
+                <Card>
+                  <Table
+                    columns={orderColumns}
+                    dataSource={orders}
+                    rowKey="id"
+                    loading={ordersLoading}
+                    size="small"
+                    scroll={{ x: 1200 }}
+                    pagination={{
+                      showSizeChanger: true,
+                      showQuickJumper: true,
+                      showTotal: (total, range) => `第 ${range[0]}-${range[1]} 条，共 ${total} 条记录`,
+                    }}
+                    locale={{
+                      emptyText: orderSymbol ? (
+                        <Empty 
+                          description={`暂无 ${orderSymbol} 的历史订单`}
+                          image={Empty.PRESENTED_IMAGE_SIMPLE}
+                        />
+                      ) : (
+                        <Empty description="暂无历史订单" />
+                      )
+                    }}
+                  />
+                </Card>
+              </>
+            )
+          }
+        ]}
+      />
     </div>
   );
 };

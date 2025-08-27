@@ -9,6 +9,7 @@ import (
 	"trading_assistant/models"
 	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
+	"trading_assistant/pkg/utils"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -191,7 +192,7 @@ func (p *PriceController) formatPriceEstimatePrecision(req *PriceEstimateRequest
 	return nil
 }
 
-// parseFloat 辅助函数，解析格式化后的浮点数
+// parseFloat 解析格式化后的浮点数
 func parseFloat(s string) float64 {
 	val, _ := strconv.ParseFloat(s, 64)
 	return val
@@ -269,44 +270,12 @@ func (p *PriceController) CreatePriceEstimate(ctx *gin.Context) {
 	logrus.Infof("创建价格预估成功: %s %s %s %.4f",
 		estimate.Symbol, estimate.Side, estimate.ActionType, estimate.TargetPrice)
 
+	// 通过WebSocket广播价格预估更新
+	go utils.BroadcastSymbolEstimatesUpdate()
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "价格预估创建成功",
 		"data":    estimate,
-	})
-}
-
-// GetPriceEstimates 获取可用的价格预估列表
-func (p *PriceController) GetPriceEstimates(ctx *gin.Context) {
-	symbol := ctx.Query("symbol")
-
-	if redis.GlobalRedisClient == nil {
-		logrus.Error("Redis客户端未初始化")
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "Redis服务不可用",
-		})
-		return
-	}
-
-	var estimates []*models.PriceEstimate
-	var err error
-
-	if symbol != "" {
-		estimates, err = redis.GlobalRedisClient.GetEstimatesBySymbol(symbol)
-	} else {
-		estimates, err = redis.GlobalRedisClient.GetEstimates()
-	}
-
-	if err != nil {
-		logrus.Errorf("获取价格预估失败: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "获取价格预估失败",
-		})
-		return
-	}
-
-	ctx.JSON(http.StatusOK, gin.H{
-		"data":  estimates,
-		"total": len(estimates),
 	})
 }
 
@@ -332,6 +301,9 @@ func (p *PriceController) DeletePriceEstimate(ctx *gin.Context) {
 	}
 
 	logrus.Infof("删除价格预估成功: %s", id)
+
+	// 通过WebSocket广播价格预估更新
+	go utils.BroadcastSymbolEstimatesUpdate()
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "价格预估删除成功",
@@ -388,27 +360,23 @@ func (p *PriceController) TogglePriceEstimate(ctx *gin.Context) {
 
 	logrus.Infof("价格预估状态已更新: %s -> %s", id, statusText)
 
+	// 通过WebSocket广播价格预估更新
+	go utils.BroadcastSymbolEstimatesUpdate()
+
 	ctx.JSON(http.StatusOK, gin.H{
 		"message": "价格预估状态更新成功",
 		"data":    estimate,
 	})
 }
 
-// GetAllPriceEstimates 获取所有状态的价格预估列表（包括listening, triggered, failed）
+// GetAllPriceEstimates 获取所有价格预估
 func (p *PriceController) GetAllPriceEstimates(ctx *gin.Context) {
 	symbol := ctx.Query("symbol")
-
-	if redis.GlobalRedisClient == nil {
-		logrus.Error("Redis客户端未初始化")
-		ctx.JSON(http.StatusServiceUnavailable, gin.H{
-			"error": "Redis服务不可用",
-		})
-		return
-	}
 
 	var estimates []*models.PriceEstimate
 	var err error
 
+	// 根据是否有symbol参数选择获取方法
 	if symbol != "" {
 		estimates, err = redis.GlobalRedisClient.GetAllEstimatesBySymbol(symbol)
 	} else {
@@ -416,82 +384,16 @@ func (p *PriceController) GetAllPriceEstimates(ctx *gin.Context) {
 	}
 
 	if err != nil {
-		logrus.Errorf("获取所有价格预估失败: %v", err)
+		logrus.Errorf("获取价格预估失败: %v", err)
 		ctx.JSON(http.StatusInternalServerError, gin.H{
 			"error": "获取价格预估失败",
 		})
 		return
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
-		"data":  estimates,
-		"total": len(estimates),
-	})
-}
-
-// GetAllSelectedCoinsPrices 获取所有选中币的markPrice数据
-func (p *PriceController) GetAllSelectedCoinsPrices(ctx *gin.Context) {
-	// 获取所有选中的币种
-	selectedCoins, err := redis.GlobalRedisClient.GetSelectedCoins()
-	if err != nil {
-		logrus.Errorf("获取选中币种失败: %v", err)
-		ctx.JSON(http.StatusInternalServerError, gin.H{
-			"error": "获取选中币种失败",
-		})
-		return
-	}
-
-	if len(selectedCoins) == 0 {
-		ctx.JSON(http.StatusOK, gin.H{
-			"data":  []interface{}{},
-			"count": 0,
-		})
-		return
-	}
-
-	var priceDataList []models.CoinPriceData
-	var successCount, errorCount int
-
-	for i := range selectedCoins {
-		coin := selectedCoins[i]
-		// 从Redis获取markPrice数据
-		markPrice, err := redis.GlobalRedisClient.GetMarkPrice(coin.Symbol)
-		if err != nil {
-			logrus.Debugf("获取 %s markPrice失败: %v", coin.Symbol, err)
-			errorCount++
-			continue
-		}
-
-		// 构造返回数据
-		priceData := models.CoinPriceData{
-			Symbol:       markPrice.Symbol,
-			MarkPrice:    markPrice.MarkPrice,
-			IndexPrice:   markPrice.IndexPrice,
-			FundingRate:  markPrice.FundingRate,
-			FundingTime:  markPrice.FundingTime,
-			UpdateTime:   markPrice.TimeStamp,
-			PriceChange:  coin.PriceChange,        // 从币种信息获取
-			PricePercent: coin.PriceChangePercent, // 从币种信息获取
-		}
-
-		priceDataList = append(priceDataList, priceData)
-		successCount++
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"total_coins":    len(selectedCoins),
-		"success_count":  successCount,
-		"error_count":    errorCount,
-		"returned_count": len(priceDataList),
-	}).Debug("批量获取选中币种价格数据完成")
+	logrus.Debugf("获取到 %d 条价格预估数据 (symbol: %s)", len(estimates), symbol)
 
 	ctx.JSON(http.StatusOK, gin.H{
-		"data":  priceDataList,
-		"count": len(priceDataList),
-		"stats": gin.H{
-			"total_coins":   len(selectedCoins),
-			"success_count": successCount,
-			"error_count":   errorCount,
-		},
+		"data": estimates,
 	})
 }

@@ -232,32 +232,32 @@ type Fee struct {
 
 // Position 持仓信息 (期货/合约)
 type Position struct {
-	Info                        map[string]interface{} `json:"info"`                        // 原始信息
-	ID                          string                 `json:"id"`                          // 持仓ID
-	Symbol                      string                 `json:"symbol"`                      // 交易对
-	Timestamp                   int64                  `json:"timestamp"`                   // 时间戳
-	Datetime                    string                 `json:"datetime"`                    // ISO8601 时间
-	Side                        string                 `json:"side"`                        // long/short
-	Size                        float64                `json:"size"`                        // 持仓大小
-	Contracts                   float64                `json:"contracts"`                   // 合约数量
-	ContractSize                float64                `json:"contractSize"`                // 合约大小
-	MarkPrice                   float64                `json:"markPrice"`                   // 标记价格
-	EntryPrice                  float64                `json:"entryPrice"`                  // 开仓价格
-	NotionalValue               float64                `json:"notionalValue"`               // 名义价值
-	Leverage                    float64                `json:"leverage"`                    // 杠杆倍数
-	Collateral                  float64                `json:"collateral"`                  // 保证金
-	InitialMargin               float64                `json:"initialMargin"`               // 初始保证金
-	MaintenanceMargin           float64                `json:"maintenanceMargin"`           // 维持保证金
-	InitialMarginPercentage     float64                `json:"initialMarginPercentage"`     // 初始保证金率
-	MaintenanceMarginPercentage float64                `json:"maintenanceMarginPercentage"` // 维持保证金率
-	MarginRatio                 float64                `json:"marginRatio"`                 // 保证金率
-	UnrealizedPnl               float64                `json:"unrealizedPnl"`               // 未实现盈亏
-	RealizedPnl                 float64                `json:"realizedPnl"`                 // 已实现盈亏
-	RoiPercentage               float64                `json:"roiPercentage"`               // ROI百分比
-	LiquidationPrice            float64                `json:"liquidationPrice"`            // 强平价格
-	PositionRisk                float64                `json:"positionRisk"`                // 持仓风险
-	MarginType                  string                 `json:"marginType"`                  // 保证金模式: ISOLATED, CROSSED
-	IsolatedMargin              float64                `json:"isolatedMargin"`              // 逐仓保证金
+	Info                        map[string]interface{} `json:"info"`                          // 原始信息
+	ID                          string                 `json:"id"`                            // 持仓ID
+	Symbol                      string                 `json:"symbol"`                        // 交易对
+	Timestamp                   int64                  `json:"timestamp"`                     // 时间戳
+	Datetime                    string                 `json:"datetime"`                      // ISO8601 时间
+	Side                        string                 `json:"side"`                          // long/short
+	Size                        float64                `json:"size"`                          // 持仓大小
+	Contracts                   float64                `json:"contracts"`                     // 合约数量
+	ContractSize                float64                `json:"contract_size"`                 // 合约大小
+	MarkPrice                   float64                `json:"mark_price"`                    // 标记价格
+	EntryPrice                  float64                `json:"entry_price"`                   // 开仓价格
+	NotionalValue               float64                `json:"notional"`                      // 名义价值
+	Leverage                    float64                `json:"leverage"`                      // 杠杆倍数
+	Collateral                  float64                `json:"collateral"`                    // 保证金
+	InitialMargin               float64                `json:"initial_margin"`                // 初始保证金
+	MaintenanceMargin           float64                `json:"maintenance_margin"`            // 维持保证金
+	InitialMarginPercentage     float64                `json:"initial_margin_percentage"`     // 初始保证金率
+	MaintenanceMarginPercentage float64                `json:"maintenance_margin_percentage"` // 维持保证金率
+	MarginRatio                 float64                `json:"margin_ratio"`                  // 保证金率
+	UnrealizedPnl               float64                `json:"unrealized_pnl"`                // 未实现盈亏
+	RealizedPnl                 float64                `json:"realized_pnl"`                  // 已实现盈亏
+	RoiPercentage               float64                `json:"roi_percentage"`                // ROI百分比
+	LiquidationPrice            float64                `json:"liquidation_price"`             // 强平价格
+	PositionRisk                float64                `json:"position_risk"`                 // 持仓风险
+	MarginType                  string                 `json:"margin_mode"`                   // 保证金模式: ISOLATED, CROSSED
+	IsolatedMargin              float64                `json:"isolated_margin"`               // 逐仓保证金
 }
 
 // FundingRate 资金费率信息

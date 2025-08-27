@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { message } from 'antd';
 import MainLayout from './components/Layout/MainLayout';
+import EventNotification from './components/Common/EventNotification';
 import Login from './pages/Login';
 import Positions from './pages/Positions';
 import Orders from './pages/Orders';
@@ -65,17 +66,20 @@ function App() {
   }
 
   return (
-    <MainLayout onLogout={handleLogout}>
-                <Routes>
-            <Route path="/" element={<Navigate to="/positions" replace />} />
-            <Route path="/positions" element={<Positions />} />
-            <Route path="/orders" element={<Orders />} />
-            <Route path="/trading-pairs" element={<TradingPairs />} />
-            <Route path="/balances" element={<Balances />} />
-            <Route path="/klines" element={<ChartPage />} />
+    <>
+      <EventNotification />
+      <MainLayout onLogout={handleLogout}>
+                  <Routes>
+              <Route path="/" element={<Navigate to="/positions" replace />} />
+              <Route path="/positions" element={<Positions />} />
+              <Route path="/orders" element={<Orders />} />
+              <Route path="/trading-pairs" element={<TradingPairs />} />
+              <Route path="/balances" element={<Balances />} />
+              <Route path="/klines" element={<ChartPage />} />
 
-          </Routes>
-    </MainLayout>
+            </Routes>
+      </MainLayout>
+    </>
   );
 }
 

@@ -21,32 +21,45 @@ func AuthMiddleware() gin.HandlerFunc {
 			path == "/favicon.svg" ||
 			path == "/manifest.json" ||
 			path == "/" ||
-			!strings.HasPrefix(path, "/api/") {
+			(!strings.HasPrefix(path, "/api/") && path != "/ws") {
 			c.Next()
 			return
 		}
 
-		authHeader := c.GetHeader("Authorization")
-		if authHeader == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "缺少Authorization头",
-				"code":  "MISSING_AUTH_HEADER",
-			})
-			c.Abort()
-			return
-		}
-
-		// 检查Bearer token格式
-		tokenString := ""
-		if strings.HasPrefix(authHeader, "Bearer ") {
-			tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+		var tokenString string
+		if path == "/ws" {
+			tokenString = c.Query("token")
+			if tokenString == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": "缺少token参数",
+					"code":  "MISSING_TOKEN_PARAM",
+				})
+				c.Abort()
+				return
+			}
 		} else {
-			c.JSON(http.StatusUnauthorized, gin.H{
-				"error": "无效的Authorization格式，应为 'Bearer <token>'",
-				"code":  "INVALID_AUTH_FORMAT",
-			})
-			c.Abort()
-			return
+			// 其他接口从Authorization头获取token
+			authHeader := c.GetHeader("Authorization")
+			if authHeader == "" {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": "缺少Authorization头",
+					"code":  "MISSING_AUTH_HEADER",
+				})
+				c.Abort()
+				return
+			}
+
+			// 检查Bearer token格式
+			if strings.HasPrefix(authHeader, "Bearer ") {
+				tokenString = strings.TrimPrefix(authHeader, "Bearer ")
+			} else {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"error": "无效的Authorization格式，应为 'Bearer <token>'",
+					"code":  "INVALID_AUTH_FORMAT",
+				})
+				c.Abort()
+				return
+			}
 		}
 
 		// 验证token

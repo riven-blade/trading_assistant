@@ -1005,8 +1005,8 @@ func (ws *WebSocket) connectUserDataStream() error {
 	baseURL := ws.getUserDataWebSocketURL()
 	url := fmt.Sprintf("%s/%s", baseURL, ws.userDataListenKey)
 
-	// 创建WebSocket连接
-	conn, err := exchanges.NewWebSocketConnection(context.Background(), url, 5) // 最大重连5次
+	// 创建WebSocket连接，使用主context以便在停止时能够取消
+	conn, err := exchanges.NewWebSocketConnection(ws.ctx, url, 5) // 最大重连5次
 	if err != nil {
 		logrus.Errorf("用户数据流连接失败，URL: %s, 错误: %v", url, err)
 		return fmt.Errorf("创建用户数据流连接失败: %w", err)

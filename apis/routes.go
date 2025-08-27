@@ -6,6 +6,7 @@ import (
 	"trading_assistant/core"
 	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/middleware"
+	"trading_assistant/pkg/websocket"
 
 	"github.com/gin-gonic/gin"
 )
@@ -17,6 +18,9 @@ func SetupRoutes(r *gin.Engine, binanceClient *binance.Binance, marketManager *c
 	monitorController := controllers.NewMonitorController(binanceClient)
 	authController := &controllers.AuthController{}
 	klineController := controllers.NewKlineController(binanceClient)
+
+	// 初始化WebSocket管理器
+	wsManager := websocket.GetGlobalWebSocketManager()
 
 	// 静态文件服务（前端构建后的文件）- 放在认证中间件之前
 	webBuildPath := "./web/build"
@@ -38,13 +42,16 @@ func SetupRoutes(r *gin.Engine, binanceClient *binance.Binance, marketManager *c
 	// 添加认证中间件
 	r.Use(middleware.AuthMiddleware())
 
-	// 认证路由（不需要token）
+	// WebSocket路由
+	r.GET("/ws", wsManager.HandleWebSocket)
+
+	// 认证路由
 	auth := r.Group("/api/v1/auth")
 	{
 		auth.POST("/login", authController.Login) // 用户登录
 	}
 
-	// API版本组（需要认证）
+	// API版本组
 	v1 := r.Group("/api/v1")
 	{
 		// 用户信息路由
@@ -65,28 +72,17 @@ func SetupRoutes(r *gin.Engine, binanceClient *binance.Binance, marketManager *c
 		// 价格预估路由
 		estimates := v1.Group("/estimates")
 		{
+			estimates.GET("/all", priceController.GetAllPriceEstimates)       // 获取所有价格预估（Orders页面需要）
 			estimates.POST("", priceController.CreatePriceEstimate)           // 创建价格预估
-			estimates.GET("", priceController.GetPriceEstimates)              // 获取价格预估列表（仅listening状态）
-			estimates.GET("/all", priceController.GetAllPriceEstimates)       // 获取所有状态的价格预估列表
 			estimates.DELETE("/:id", priceController.DeletePriceEstimate)     // 删除价格预估
 			estimates.PUT("/:id/toggle", priceController.TogglePriceEstimate) // 切换价格预估监听状态
-		}
-
-		// 价格数据路由
-		prices := v1.Group("/prices")
-		{
-			prices.GET("/selected", priceController.GetAllSelectedCoinsPrices) // 批量获取选中币种价格数据
 		}
 
 		// 监控管理路由
 		monitor := v1.Group("/monitor")
 		{
-			monitor.GET("/positions", monitorController.GetPositions)         // 获取持仓信息
-			monitor.GET("/balances", monitorController.GetBalances)           // 获取余额信息
-			monitor.GET("/orders", monitorController.GetOrders)               // 获取订单信息
-			monitor.POST("/orders/cancel", monitorController.CancelOrder)     // 取消订单
-			monitor.GET("/orderbook/:symbol", monitorController.GetOrderbook) // 获取订单薄
-
+			monitor.GET("/orders", monitorController.GetOrders)           // 获取订单信息（Orders页面需要）
+			monitor.POST("/orders/cancel", monitorController.CancelOrder) // 取消订单
 		}
 
 		// K线分析路由

@@ -1,12 +1,15 @@
 package core
 
 import (
+	"fmt"
 	"time"
 	"trading_assistant/models"
 	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
+	"trading_assistant/pkg/utils"
+	"trading_assistant/pkg/websocket"
 
 	"github.com/sirupsen/logrus"
 )
@@ -165,6 +168,9 @@ func (pm *PriceMonitor) triggerEstimate(estimate *models.PriceEstimate, currentP
 	} else {
 		// 更新预估状态为已触发
 		estimate.Status = models.EstimateStatusTriggered
+
+		// 广播预估触发事件
+		go pm.broadcastEstimateTriggerEvent(estimate, currentPrice)
 	}
 
 	estimate.UpdatedAt = time.Now()
@@ -173,4 +179,41 @@ func (pm *PriceMonitor) triggerEstimate(estimate *models.PriceEstimate, currentP
 		logrus.Errorf("更新价格预估状态失败: %v", err)
 		return
 	}
+
+	// 通过WebSocket广播价格预估更新
+	go utils.BroadcastSymbolEstimatesUpdate()
+}
+
+// broadcastEstimateTriggerEvent 广播预估触发事件到WebSocket客户端
+func (pm *PriceMonitor) broadcastEstimateTriggerEvent(estimate *models.PriceEstimate, currentPrice float64) {
+	// 获取WebSocket管理器
+	wsManager := websocket.GetGlobalWebSocketManager()
+	if wsManager == nil {
+		return
+	}
+
+	// 准备事件数据
+	event := map[string]interface{}{
+		"event_type": "estimate_trigger",
+		"timestamp":  time.Now().Unix(),
+		"data": map[string]interface{}{
+			"type": "estimate_trigger",
+			"message": fmt.Sprintf("预估价已触发: %s %s %.4f -> %.4f",
+				estimate.Symbol, estimate.Side, estimate.TargetPrice, currentPrice),
+			"data": map[string]interface{}{
+				"estimate_id":   estimate.ID,
+				"symbol":        estimate.Symbol,
+				"side":          estimate.Side,
+				"action_type":   estimate.ActionType,
+				"target_price":  estimate.TargetPrice,
+				"current_price": currentPrice,
+				"trigger_time":  time.Now().Unix(),
+			},
+		},
+	}
+
+	// 广播事件
+	wsManager.BroadcastEvent(event)
+	logrus.Infof("通过WebSocket广播预估触发事件: %s %s %.4f",
+		estimate.Symbol, estimate.Side, estimate.TargetPrice)
 }

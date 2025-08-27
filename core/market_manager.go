@@ -25,6 +25,11 @@ func NewMarketManager(binanceClient *binance.Binance) *MarketManager {
 	}
 }
 
+// GetPriceManager 获取价格管理器
+func (mm *MarketManager) GetPriceManager() *PriceManager {
+	return mm.priceManager
+}
+
 // InitializeMarketData 初始化市场数据
 func (mm *MarketManager) InitializeMarketData() error {
 	return mm.syncMarketData()

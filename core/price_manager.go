@@ -3,12 +3,14 @@ package core
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"sync"
 	"time"
 	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
+	"trading_assistant/pkg/websocket"
 
 	"github.com/sirupsen/logrus"
 )
@@ -118,7 +120,7 @@ func (pm *PriceManager) SubscribePrice(symbol string) error {
 	}
 
 	// 订阅markPrice
-	publishFunc := pm.createPriceHandler(symbol)
+	publishFunc := pm.createPriceHandler()
 	err := pm.binanceClient.SubscribeToMarkPrice(symbol, publishFunc)
 	if err != nil {
 		subscription.Status = "error"
@@ -229,7 +231,7 @@ func (pm *PriceManager) subscribePriceWithoutLock(symbol string) error {
 		LastData:  time.Time{},
 	}
 
-	publishFunc := pm.createPriceHandler(symbol)
+	publishFunc := pm.createPriceHandler()
 	err := pm.binanceClient.SubscribeToMarkPrice(symbol, publishFunc)
 	if err != nil {
 		subscription.Status = "error"
@@ -255,7 +257,8 @@ func (pm *PriceManager) subscribeSelectedCoins() error {
 	}
 
 	var successCount, errorCount int
-	for _, symbol := range selectedSymbols {
+	for i := range selectedSymbols {
+		symbol := selectedSymbols[i]
 		if err := pm.SubscribePrice(symbol); err != nil {
 			logrus.Errorf("订阅 %s markPrice失败: %v", symbol, err)
 			errorCount++
@@ -274,13 +277,13 @@ func (pm *PriceManager) subscribeSelectedCoins() error {
 }
 
 // createPriceHandler 创建价格数据处理器
-func (pm *PriceManager) createPriceHandler(symbol string) func(types.MetaData, interface{}) error {
+func (pm *PriceManager) createPriceHandler() func(types.MetaData, interface{}) error {
 	return func(metadata types.MetaData, data interface{}) error {
 		// 更新最后数据时间
-		pm.updateLastDataTime(symbol)
+		pm.updateLastDataTime(metadata.MarketID)
 
 		// 处理markPrice数据
-		return pm.processPriceData(symbol, metadata, data)
+		return pm.processPriceData(metadata, data)
 	}
 }
 
@@ -295,7 +298,10 @@ func (pm *PriceManager) updateLastDataTime(symbol string) {
 }
 
 // processPriceData 处理markPrice数据并保存到Redis
-func (pm *PriceManager) processPriceData(symbol string, metadata types.MetaData, data interface{}) error {
+func (pm *PriceManager) processPriceData(metadata types.MetaData, data interface{}) error {
+	// 从metadata中获取symbol
+	symbol := metadata.MarketID
+
 	// 只处理选中的币种数据
 	if !redis.GlobalRedisClient.IsCoinSelected(symbol) {
 		// 如果币种不再选中，应该取消订阅
@@ -324,6 +330,9 @@ func (pm *PriceManager) processPriceData(symbol string, metadata types.MetaData,
 
 	logrus.Debugf("保存 %s markPrice数据成功，标记价格: %f",
 		symbol, markPrice.MarkPrice)
+
+	// 通过WebSocket广播价格更新
+	go pm.broadcastPriceUpdate(symbol, markPrice)
 
 	return nil
 }
@@ -357,6 +366,46 @@ func (pm *PriceManager) GetSubscriptionStatus() map[string]*PriceSubscription {
 	}
 
 	return status
+}
+
+// broadcastPriceUpdate 广播单个币种价格更新到WebSocket客户端
+func (pm *PriceManager) broadcastPriceUpdate(symbol string, markPrice *types.WatchMarkPrice) {
+	// 获取WebSocket管理器
+	wsManager := websocket.GetGlobalWebSocketManager()
+	if wsManager == nil {
+		return
+	}
+
+	// 获取coin数据来获取价格变化信息
+	priceChange := 0.0
+	priceChangePercent := 0.0
+
+	if coin, coinErr := redis.GlobalRedisClient.GetCoin(symbol); coinErr == nil {
+		if change, parseErr := strconv.ParseFloat(coin.PriceChange, 64); parseErr == nil {
+			priceChange = change
+		}
+		if changePercent, parseErr := strconv.ParseFloat(coin.PriceChangePercent, 64); parseErr == nil {
+			priceChangePercent = changePercent
+		}
+	}
+
+	// 构建单个币种的价格数据
+	singlePriceData := map[string]interface{}{
+		symbol: map[string]interface{}{
+			"symbol":             symbol,
+			"markPrice":          markPrice.MarkPrice,
+			"indexPrice":         markPrice.IndexPrice,
+			"fundingRate":        markPrice.FundingRate,
+			"fundingTime":        markPrice.FundingTime,
+			"updateTime":         markPrice.TimeStamp,
+			"priceChange":        priceChange,
+			"priceChangePercent": priceChangePercent,
+		},
+	}
+
+	// 立即广播单个币种数据
+	wsManager.BroadcastPrices(singlePriceData)
+	logrus.Debugf("通过WebSocket广播单币种价格更新: %s", symbol)
 }
 
 // handleWebSocketReconnect 处理WebSocket重连事件

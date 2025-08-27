@@ -44,26 +44,26 @@ const TradeDrawer = ({
   onMarginModeChange
 }) => {
   // 获取当前价格
-  const currentPrice = priceData?.[symbol]?.markPrice || priceData?.[symbol]?.currentPrice || 0;
+  const markPrice = priceData?.[symbol]?.markPrice || 0;
   const baseAsset = symbol?.replace('USDT', '') || '';
   
   // 计算预估USDT金额
-  const estimatedUsdtAmount = currentPrice > 0 && quantity > 0 ? (quantity * currentPrice) / selectedLeverage : 0;
+  const estimatedUsdtAmount = markPrice > 0 && quantity > 0 ? (quantity * markPrice) / selectedLeverage : 0;
   
   // 计算最大数量
   const getMaxQuantity = () => {
-    if (!currentPrice || !selectedLeverage || !accountValue?.usdt_free) return 1;
+    if (!markPrice || !selectedLeverage || !accountValue?.usdt_free) return 1;
     const maxUsdtAmount = accountValue.usdt_free * 0.8; // 使用80%的可用余额
-    const priceToUse = targetPrice > 0 ? targetPrice : currentPrice;
+    const priceToUse = targetPrice > 0 ? targetPrice : markPrice;
     const maxQuantity = (maxUsdtAmount * selectedLeverage) / priceToUse;
     return parseFloat(maxQuantity.toFixed(6));
   };
   
   // 获取价格范围 (当前价格的 ±20%)
   const getPriceRange = () => {
-    if (!currentPrice) return [0, 100];
-    const range = currentPrice * 0.2;
-    return [currentPrice - range, currentPrice + range];
+    if (!markPrice) return [0, 100];
+    const range = markPrice * 0.2;
+    return [markPrice - range, markPrice + range];
   };
 
   const [minPrice, maxPrice] = getPriceRange();
@@ -110,7 +110,7 @@ const TradeDrawer = ({
           {/* 价格信息 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
             <Text type="secondary">当前价格:</Text>
-            <Text strong style={{ color: '#1890ff', fontSize: '16px' }}>${currentPrice?.toFixed(4) || '0.0000'}</Text>
+            <Text strong style={{ color: '#1890ff', fontSize: '16px' }}>${markPrice?.toFixed(4) || '0.0000'}</Text>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
             <Text type="secondary">可用余额:</Text>
@@ -139,7 +139,7 @@ const TradeDrawer = ({
           {orderType === 'limit' && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
               <Text type="secondary">限价价格:</Text>
-              <Text strong>${targetPrice?.toFixed(4) || currentPrice?.toFixed(4)}</Text>
+              <Text strong>${targetPrice?.toFixed(4) || markPrice?.toFixed(4)}</Text>
             </div>
           )}
         </div>
@@ -161,16 +161,16 @@ const TradeDrawer = ({
           <Form.Item>
             <TradingSlider
               title="价格调整"
-              value={targetPrice || currentPrice}
+              value={targetPrice || markPrice}
               min={minPrice}
               max={maxPrice}
-              step={currentPrice * 0.001}
+              step={markPrice * 0.001}
               onChange={onPriceChange}
               marks={{
-                [currentPrice]: '市场价'
+                [markPrice]: '市场价'
               }}
               displayLabel="下单价:"
-              displayValue={`$${(targetPrice || currentPrice)?.toFixed(4)}`}
+              displayValue={`$${(targetPrice || markPrice)?.toFixed(4)}`}
               tooltipFormatter={(value) => `$${value?.toFixed(4)}`}
             />
           </Form.Item>

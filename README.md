@@ -144,11 +144,6 @@ GET /api/v1/estimates?symbol=BTCUSDT&status=pending
 GET /api/v1/monitor/account
 ```
 
-#### 获取持仓信息
-```bash
-GET /api/v1/monitor/positions
-```
-
 #### 获取余额信息
 ```bash
 GET /api/v1/monitor/balances

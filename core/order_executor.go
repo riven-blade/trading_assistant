@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"fmt"
+	"github.com/sirupsen/logrus"
 	"math"
 	"strconv"
 	"strings"
@@ -12,8 +13,7 @@ import (
 	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
 	"trading_assistant/pkg/telegram"
-
-	"github.com/sirupsen/logrus"
+	"trading_assistant/pkg/utils"
 )
 
 // OrderExecutor 订单执行器
@@ -429,6 +429,20 @@ func (oe *OrderExecutor) updateEstimateStatus(estimate *models.PriceEstimate, st
 		"old_status":  estimate.Status,
 		"new_status":  status,
 	}).Debug("更新预估状态")
+
+	// 更新预估状态
+	estimate.Status = status
+	estimate.UpdatedAt = time.Now()
+
+	// 保存到Redis
+	err := redis.GlobalRedisClient.SetPriceEstimate(estimate)
+	if err != nil {
+		logrus.Errorf("更新预估状态失败: %v", err)
+		return err
+	}
+
+	// 通过WebSocket广播价格预估更新
+	go utils.BroadcastSymbolEstimatesUpdate()
 
 	return nil
 }

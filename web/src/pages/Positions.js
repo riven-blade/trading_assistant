@@ -29,7 +29,7 @@ const Positions = () => {
   const [drawerVisible, setDrawerVisible] = useState(false);
   const [currentPosition, setCurrentPosition] = useState(null);
   const [actionType, setActionType] = useState('');
-  const [currentPrice, setCurrentPrice] = useState(0);
+  const [markPrice, setMarkPrice] = useState(0);
   const [targetPrice, setTargetPrice] = useState(0);
   const [quantity, setQuantity] = useState(0);
   const [pricePercentage, setPricePercentage] = useState(0);
@@ -66,7 +66,17 @@ const Positions = () => {
   // 获取所有持仓的监听数量
   const fetchPositionsWithMonitors = useCallback((positionsData) => {
     try {
+      console.log('[持仓页面] fetchPositionsWithMonitors 开始处理，输入数据:', positionsData);
+      console.log('[持仓页面] 输入持仓数量:', positionsData.length);
+      
       const positionsWithCount = positionsData.map((position) => {
+        console.log('[持仓页面] 处理持仓:', {
+          symbol: position.symbol,
+          side: position.side,
+          size: position.size,
+          sizeType: typeof position.size
+        });
+        
         // 从全局estimates数据中过滤出该持仓相关的监听
         const filteredEstimates = getEstimatesBySymbol(position.symbol, 'listening').filter(estimate => 
           estimate.side === position.side.toLowerCase()
@@ -77,6 +87,9 @@ const Positions = () => {
           monitorCount: filteredEstimates.length
         };
       });
+      
+      console.log('[持仓页面] 处理完成，输出数据:', positionsWithCount);
+      console.log('[持仓页面] 输出持仓数量:', positionsWithCount.length);
       
       setPositionsWithMonitors(positionsWithCount);
     } catch (error) {
@@ -99,7 +112,7 @@ const Positions = () => {
     }
     
     const priceInfo = getPriceBySymbol(symbol);
-    const price = priceInfo?.markPrice || priceInfo?.currentPrice || 0;
+    const price = priceInfo?.markPrice || 0;
     
     return price;
   }, [getPriceBySymbol, priceDataLoading, hasPriceData]);
@@ -127,7 +140,7 @@ const Positions = () => {
     setActionType(action);
     
     const price = getCurrentPrice(position.symbol);
-    setCurrentPrice(price);
+    setMarkPrice(price);
     
     const entryPrice = position.entry_price || price;
     const isLong = position.side === 'LONG';
@@ -165,7 +178,7 @@ const Positions = () => {
     }
     
     const priceBase = config.priceBase || 'current';
-    const basePrice = priceBase === 'current' ? currentPrice : currentPosition.entry_price;
+    const basePrice = priceBase === 'current' ? markPrice : currentPosition.entry_price;
     let newTargetPrice = basePrice * (1 + percentage / 100);
     
     setTargetPrice(newTargetPrice);
@@ -197,7 +210,7 @@ const Positions = () => {
     if (actionType === 'addition') {
       // 加仓：基于可用余额和目标价格计算，随价格变化
       const maxUsdtAmount = accountValue.usdt_free * 0.8; // 使用80%的可用余额
-      const priceToUse = targetPrice > 0 ? targetPrice : currentPrice; // 使用目标价格
+      const priceToUse = targetPrice > 0 ? targetPrice : markPrice; // 使用目标价格
       if (priceToUse > 0 && currentPosition.leverage > 0) {
         // 最大数量 = (最大USDT × 杠杆) ÷ 目标价格
         const maxQuantity = (maxUsdtAmount * currentPosition.leverage) / priceToUse;
@@ -253,15 +266,15 @@ const Positions = () => {
       );
       
       // 获取当前价格并计算差异
-      const currentPrice = getCurrentPrice(position.symbol);
+      const positionMarkPrice = getCurrentPrice(position.symbol);
       
       const estimatesWithPrice = filteredEstimates.map(estimate => {
-        const priceDiff = currentPrice > 0 ? 
-          ((estimate.target_price - currentPrice) / currentPrice * 100) : 0;
+        const priceDiff = positionMarkPrice > 0 ? 
+          ((estimate.target_price - positionMarkPrice) / positionMarkPrice * 100) : 0;
         
         return {
           ...estimate,
-          current_price: currentPrice,
+          current_price: positionMarkPrice,
           price_difference: priceDiff,
           is_close_to_trigger: Math.abs(priceDiff) <= 2
         };
@@ -278,9 +291,14 @@ const Positions = () => {
 
   // 监听positions变化，获取监听数量
   useEffect(() => {
+    console.log('[持仓页面] positions变化触发 useEffect，positions:', positions);
+    console.log('[持仓页面] positions.length:', positions.length);
+    
     if (positions.length > 0) {
+      console.log('[持仓页面] 调用 fetchPositionsWithMonitors');
       fetchPositionsWithMonitors(positions);
     } else {
+      console.log('[持仓页面] positions为空，设置空数组');
       setPositionsWithMonitors([]);
     }
   }, [positions, fetchPositionsWithMonitors]);
@@ -348,27 +366,34 @@ const Positions = () => {
         actions={headerActions}
       />
 
-      {positionsWithMonitors.length === 0 ? (
+      {(() => {
+        console.log('[持仓页面] 渲染检查 - positionsWithMonitors:', positionsWithMonitors);
+        console.log('[持仓页面] 渲染检查 - positionsWithMonitors.length:', positionsWithMonitors.length);
+        return positionsWithMonitors.length === 0;
+      })() ? (
         <Empty description="暂无持仓数据" />
       ) : (
         <Row gutter={[16, 16]}>
-          {positionsWithMonitors.map((position) => (
-            <Col 
-              xs={24} 
-              sm={12} 
-              md={8} 
-              lg={6} 
-              xl={4} 
-              key={`${position.symbol}_${position.side}`}
-            >
-              <PositionCard
-                position={position}
-                currentPrice={getCurrentPrice(position.symbol)}
-                onAction={handleAction}
-                onViewDetails={openDetailDrawer}
-              />
-            </Col>
-          ))}
+          {positionsWithMonitors.map((position) => {
+            console.log('[持仓页面] 渲染持仓卡片:', position);
+            return (
+              <Col 
+                xs={24} 
+                sm={12} 
+                md={8} 
+                lg={6} 
+                xl={4} 
+                key={`${position.symbol}_${position.side}`}
+              >
+                <PositionCard
+                  position={position}
+                  currentPrice={getCurrentPrice(position.symbol)}
+                  onAction={handleAction}
+                  onViewDetails={openDetailDrawer}
+                />
+              </Col>
+            );
+          })}
         </Row>
       )}
 
@@ -441,19 +466,19 @@ const Positions = () => {
                 <div>
                   <Text type="secondary" style={{ fontSize: '12px', display: 'block' }}>当前价格</Text>
                   <Text strong style={{ fontSize: '14px', color: '#10b981' }}>
-                    ${currentPrice.toFixed(4)}
+                    ${(markPrice || 0).toFixed(4)}
                   </Text>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: '12px', display: 'block' }}>开仓价格</Text>
                   <Text strong style={{ fontSize: '14px', color: '#374151' }}>
-                    ${currentPosition.entry_price.toFixed(4)}
+                    ${(currentPosition.entry_price || 0).toFixed(4)}
                   </Text>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: '12px', display: 'block' }}>持仓数量</Text>
                   <Text strong style={{ fontSize: '14px', color: '#374151' }}>
-                    {Math.abs(currentPosition.size).toFixed(4)}
+                    {Math.abs(currentPosition.size || 0).toFixed(4)}
                   </Text>
                 </div>
                 <div>
@@ -462,7 +487,7 @@ const Positions = () => {
                     fontSize: '14px', 
                     color: currentPosition.unrealized_pnl >= 0 ? '#10b981' : '#ef4444' 
                   }}>
-                    {currentPosition.unrealized_pnl >= 0 ? '+' : ''}{currentPosition.unrealized_pnl.toFixed(2)} USDT
+                    {(currentPosition.unrealized_pnl || 0) >= 0 ? '+' : ''}{(currentPosition.unrealized_pnl || 0).toFixed(2)} USDT
                   </Text>
                 </div>
               </div>
@@ -471,7 +496,7 @@ const Positions = () => {
             {/* 价格滑块 */}
             <PriceSlider
               action={actionType}
-              currentPrice={currentPrice}
+              currentPrice={markPrice}
               entryPrice={currentPosition.entry_price}
               percentage={pricePercentage}
               onPercentageChange={handlePriceSliderChange}
@@ -502,10 +527,10 @@ const Positions = () => {
                   const marginRequired = calculateUsdtAmount(quantity, targetPrice, currentPosition.leverage);
                   return (
                     <>
-                      <Text strong>预计使用: {marginRequired.toFixed(2)} USDT</Text>
+                      <Text strong>预计使用: {(marginRequired || 0).toFixed(2)} USDT</Text>
                       <br />
                       <Text type="secondary">
-                        可用余额: {accountValue.usdt_free.toFixed(2)} USDT
+                        可用余额: {(accountValue.usdt_free || 0).toFixed(2)} USDT
                       </Text>
                     </>
                   );
@@ -514,7 +539,7 @@ const Positions = () => {
                 (() => {
                   const expectedPnl = calculatePnl(quantity, currentPosition.entry_price, targetPrice, currentPosition.side);
                   return (
-                    <Text strong>预计盈亏: {expectedPnl.toFixed(2)} USDT</Text>
+                    <Text strong>预计盈亏: {(expectedPnl || 0).toFixed(2)} USDT</Text>
                   );
                 })()
               )}

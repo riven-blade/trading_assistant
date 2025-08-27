@@ -28,20 +28,21 @@ const TradingPairCard = ({
   isMobile = false
 }) => {
   const symbol = pair.symbol;
-  const hasValidPrice = priceInfo && priceInfo.hasValidData;
+  const hasValidPrice = priceInfo && priceInfo.markPrice > 0;
   
   // 格式化价格显示
   const formatPrice = (price) => {
     if (!price) return 'N/A';
-    if (price >= 1000) return price.toFixed(2);
-    if (price >= 1) return price.toFixed(4);
-    return price.toFixed(6);
+    const numPrice = Number(price) || 0;
+    if (numPrice >= 1000) return numPrice.toFixed(2);
+    if (numPrice >= 1) return numPrice.toFixed(4);
+    return numPrice.toFixed(6);
   };
 
   // 格式化百分比
   const formatPercent = (percent) => {
     if (!percent) return null;
-    const value = parseFloat(percent);
+    const value = parseFloat(percent) || 0;
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   };
 
@@ -54,7 +55,15 @@ const TradingPairCard = ({
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
             {hasAnyEstimate(symbol) && (
               <Tag size="small" color="blue" className="estimate-badge">
-                监听 {symbolEstimates[symbol] || ''}
+                监听 {(() => {
+                  const estimates = symbolEstimates[symbol];
+                  if (Array.isArray(estimates)) {
+                    return estimates.length;
+                  } else if (typeof estimates === 'number') {
+                    return estimates;
+                  }
+                  return '';
+                })()}
               </Tag>
             )}
             <button
