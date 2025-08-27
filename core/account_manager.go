@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"trading_assistant/models"
 	"trading_assistant/pkg/exchanges/binance"
@@ -20,6 +21,11 @@ type AccountManager struct {
 	running       bool             // 运行状态
 	stopChan      chan bool        // 停止信号通道
 	binanceClient *binance.Binance // Binance客户端，用于WebSocket连接
+
+	// 防抖动定时器
+	balanceDebounceTimer  *time.Timer // 余额更新防抖动定时器
+	positionDebounceTimer *time.Timer // 仓位更新防抖动定时器
+	debounceMutex         sync.Mutex  // 定时器锁
 }
 
 // GlobalAccountManager 全局账户管理器实例
@@ -31,6 +37,9 @@ func InitAccountManager(binanceClient *binance.Binance) {
 		running:       false,
 		stopChan:      make(chan bool),
 		binanceClient: binanceClient,
+		// 初始化防抖动定时器（还未启动）
+		balanceDebounceTimer:  nil,
+		positionDebounceTimer: nil,
 	}
 }
 
@@ -72,6 +81,9 @@ func (am *AccountManager) Stop() {
 			logrus.Info("用户数据流已停止")
 		}
 	}
+
+	// 清理防抖动定时器
+	am.cleanupDebounceTimers()
 
 	am.stopChan <- true
 	logrus.Info("账户监控已停止")
@@ -159,18 +171,93 @@ func (am *AccountManager) handleUserDataMessage(metadata types.MetaData, data in
 	return nil
 }
 
+// cleanupDebounceTimers 清理防抖动定时器
+func (am *AccountManager) cleanupDebounceTimers() {
+	am.debounceMutex.Lock()
+	defer am.debounceMutex.Unlock()
+
+	// 停止并清理余额定时器
+	if am.balanceDebounceTimer != nil {
+		am.balanceDebounceTimer.Stop()
+		am.balanceDebounceTimer = nil
+		logrus.Debug("余额防抖动定时器已清理")
+	}
+
+	// 停止并清理仓位定时器
+	if am.positionDebounceTimer != nil {
+		am.positionDebounceTimer.Stop()
+		am.positionDebounceTimer = nil
+		logrus.Debug("仓位防抖动定时器已清理")
+	}
+}
+
+// debounceBalanceUpdate 防抖动余额更新，延迟1秒执行
+func (am *AccountManager) debounceBalanceUpdate() {
+	am.debounceMutex.Lock()
+	defer am.debounceMutex.Unlock()
+
+	// 如果AccountManager已停止，不创建新的定时器
+	if !am.running {
+		logrus.Debug("AccountManager已停止，跳过余额防抖动")
+		return
+	}
+
+	// 如果已有定时器，停止它
+	if am.balanceDebounceTimer != nil {
+		am.balanceDebounceTimer.Stop()
+	}
+
+	// 创建新的定时器，1秒后执行
+	am.balanceDebounceTimer = time.AfterFunc(1*time.Second, func() {
+		// 检查AccountManager是否还在运行
+		if !am.running {
+			logrus.Debug("AccountManager已停止，跳过余额刷新")
+			return
+		}
+		logrus.Info("防抖动延迟后执行余额刷新")
+		am.refreshBalances()
+	})
+}
+
+// debouncePositionUpdate 防抖动仓位更新，延迟1秒执行
+func (am *AccountManager) debouncePositionUpdate() {
+	am.debounceMutex.Lock()
+	defer am.debounceMutex.Unlock()
+
+	// 如果AccountManager已停止，不创建新的定时器
+	if !am.running {
+		logrus.Debug("AccountManager已停止，跳过仓位防抖动")
+		return
+	}
+
+	// 如果已有定时器，停止它
+	if am.positionDebounceTimer != nil {
+		am.positionDebounceTimer.Stop()
+	}
+
+	// 创建新的定时器，1秒后执行
+	am.positionDebounceTimer = time.AfterFunc(1*time.Second, func() {
+		// 检查AccountManager是否还在运行
+		if !am.running {
+			logrus.Debug("AccountManager已停止，跳过仓位刷新")
+			return
+		}
+		logrus.Info("防抖动延迟后执行仓位刷新")
+		am.refreshPositions()
+	})
+}
+
 // handleAccountUpdate 处理账户更新事件
 func (am *AccountManager) handleAccountUpdate(accountUpdate *types.WatchAccountUpdate) error {
 	logrus.Infof("收到账户更新事件，余额数量: %d，持仓数量: %d",
 		len(accountUpdate.Balances), len(accountUpdate.Positions))
 
 	if len(accountUpdate.Balances) > 0 {
-		go am.refreshBalances()
+		go am.debounceBalanceUpdate()
 	}
 
 	if len(accountUpdate.Positions) > 0 {
-		logrus.Infof("检测到持仓更新，重新获取最新持仓数据")
-		go am.refreshPositions()
+		go am.debouncePositionUpdate()
 	}
 	return nil
 }
