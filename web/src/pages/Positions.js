@@ -66,16 +66,7 @@ const Positions = () => {
   // 获取所有持仓的监听数量
   const fetchPositionsWithMonitors = useCallback((positionsData) => {
     try {
-      console.log('[持仓页面] fetchPositionsWithMonitors 开始处理，输入数据:', positionsData);
-      console.log('[持仓页面] 输入持仓数量:', positionsData.length);
-      
       const positionsWithCount = positionsData.map((position) => {
-        console.log('[持仓页面] 处理持仓:', {
-          symbol: position.symbol,
-          side: position.side,
-          size: position.size,
-          sizeType: typeof position.size
-        });
         
         // 从全局estimates数据中过滤出该持仓相关的监听
         const filteredEstimates = getEstimatesBySymbol(position.symbol, 'listening').filter(estimate => 
@@ -87,9 +78,6 @@ const Positions = () => {
           monitorCount: filteredEstimates.length
         };
       });
-      
-      console.log('[持仓页面] 处理完成，输出数据:', positionsWithCount);
-      console.log('[持仓页面] 输出持仓数量:', positionsWithCount.length);
       
       setPositionsWithMonitors(positionsWithCount);
     } catch (error) {
@@ -291,14 +279,9 @@ const Positions = () => {
 
   // 监听positions变化，获取监听数量
   useEffect(() => {
-    console.log('[持仓页面] positions变化触发 useEffect，positions:', positions);
-    console.log('[持仓页面] positions.length:', positions.length);
-    
     if (positions.length > 0) {
-      console.log('[持仓页面] 调用 fetchPositionsWithMonitors');
       fetchPositionsWithMonitors(positions);
     } else {
-      console.log('[持仓页面] positions为空，设置空数组');
       setPositionsWithMonitors([]);
     }
   }, [positions, fetchPositionsWithMonitors]);
@@ -366,17 +349,11 @@ const Positions = () => {
         actions={headerActions}
       />
 
-      {(() => {
-        console.log('[持仓页面] 渲染检查 - positionsWithMonitors:', positionsWithMonitors);
-        console.log('[持仓页面] 渲染检查 - positionsWithMonitors.length:', positionsWithMonitors.length);
-        return positionsWithMonitors.length === 0;
-      })() ? (
+      {positionsWithMonitors.length === 0 ? (
         <Empty description="暂无持仓数据" />
       ) : (
         <Row gutter={[16, 16]}>
-          {positionsWithMonitors.map((position) => {
-            console.log('[持仓页面] 渲染持仓卡片:', position);
-            return (
+          {positionsWithMonitors.map((position) => (
               <Col 
                 xs={24} 
                 sm={12} 
@@ -392,8 +369,7 @@ const Positions = () => {
                   onViewDetails={openDetailDrawer}
                 />
               </Col>
-            );
-          })}
+          ))}
         </Row>
       )}
 

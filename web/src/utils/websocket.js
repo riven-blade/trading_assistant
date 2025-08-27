@@ -24,12 +24,12 @@ class WebSocketManager {
   // 连接WebSocket
   connect() {
     if (this.isConnected) {
-      console.log('[WebSocket] 已经连接');
+
       return Promise.resolve();
     }
 
     if (this.isConnecting) {
-      console.log('[WebSocket] 正在连接中');
+
       return Promise.reject(new Error('Already connecting'));
     }
 
@@ -61,7 +61,7 @@ class WebSocketManager {
         this.ws = new WebSocket(wsUrl);
 
         this.ws.onopen = () => {
-          console.log('[WebSocket] 连接成功');
+
           this.isConnected = true;
           this.isConnecting = false;
           this.reconnectAttempts = 0;
@@ -143,7 +143,7 @@ class WebSocketManager {
     }
     this.isConnected = false;
     this.stopHeartbeat();
-    console.log('[WebSocket] 主动断开连接');
+
   }
 
   // 发送消息
@@ -161,7 +161,6 @@ class WebSocketManager {
     } else {
       // 添加到消息队列
       this.messageQueue.push(message);
-      console.log('[WebSocket] 连接建立中，消息已加入队列（将在连接后处理）');
       return false;
     }
   }
@@ -302,13 +301,13 @@ class WebSocketManager {
         timestamp: Date.now()
       });
     });
-    console.log('[WebSocket] 重新订阅所有数据类型');
+
   }
 
   // 处理消息队列
   processMessageQueue() {
     if (this.messageQueue.length > 0) {
-      console.log(`[WebSocket] 处理消息队列，共 ${this.messageQueue.length} 条消息`);
+
       const queue = [...this.messageQueue];
       this.messageQueue = [];
       
@@ -343,12 +342,8 @@ class WebSocketManager {
   scheduleReconnect() {
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 30000); // 指数退避，最大30秒
-    
-    console.log(`[WebSocket] ${delay}ms 后尝试第 ${this.reconnectAttempts} 次重连`);
-    
     setTimeout(() => {
       if (!this.isConnected) {
-        console.log(`[WebSocket] 尝试第 ${this.reconnectAttempts} 次重连`);
         this.connect().then(() => {
           // 通知所有重连监听者
           this.reconnectListeners.forEach(callback => {

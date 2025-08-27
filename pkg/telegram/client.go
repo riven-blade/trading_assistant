@@ -117,3 +117,25 @@ func (t *TelegramClient) SendError(operation string, err error) error {
 
 	return t.SendMessage(message)
 }
+
+// SendServiceStatus 发送服务状态通知
+func (t *TelegramClient) SendServiceStatus(status, message string) error {
+	var emoji string
+	switch status {
+	case "starting":
+		emoji = "🟡"
+	case "started":
+		emoji = "🟢"
+	case "stopping":
+		emoji = "🔴"
+	case "stopped":
+		emoji = "⛔"
+	case "error":
+		emoji = "❌"
+	default:
+		emoji = "ℹ️"
+	}
+
+	text := fmt.Sprintf("%s **%s**", emoji, message)
+	return t.SendMessage(text)
+}

@@ -106,7 +106,6 @@ const useEstimates = () => {
 
     // 定义连接状态回调函数
     const handleConnect = () => {
-      console.log('[价格预估] WebSocket连接成功');
       if (mounted) {
         setWsConnected(true);
         setError(null);
@@ -114,7 +113,6 @@ const useEstimates = () => {
     };
 
     const handleDisconnect = () => {
-      console.log('[价格预估] WebSocket连接断开');
       if (mounted) {
         setWsConnected(false);
         setError('WebSocket连接断开');

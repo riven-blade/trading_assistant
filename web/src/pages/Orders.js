@@ -377,13 +377,6 @@ const Orders = () => {
 
   const orderColumns = [
     {
-      title: '订单ID',
-      dataIndex: 'id',
-      key: 'id',
-      width: 120,
-      render: (id) => <Text style={{ fontSize: '12px', fontFamily: 'monospace' }}>{String(id)}</Text>
-    },
-    {
       title: '交易对',
       dataIndex: 'symbol',
       key: 'symbol',
@@ -393,54 +386,6 @@ const Orders = () => {
     {
       title: '方向',
       key: 'direction',
-      width: 120,
-      render: (_, record) => {
-        const { side, position_side } = record;
-        
-        // 订单方向显示
-        const orderSideColor = side === 'BUY' ? 'green' : 'red';
-        
-        // 持仓方向显示
-        const getPositionSideDisplay = (positionSide) => {
-          if (!positionSide || positionSide === '') {
-            return { text: '-', color: 'default' };
-          }
-          
-          const colorMap = {
-            'LONG': 'green',
-            'SHORT': 'red', 
-            'BOTH': 'blue'
-          };
-          
-          const textMap = {
-            'LONG': '多头',
-            'SHORT': '空头',
-            'BOTH': '单向'
-          };
-          
-          return {
-            text: textMap[positionSide] || positionSide,
-            color: colorMap[positionSide] || 'default'
-          };
-        };
-        
-        const positionDisplay = getPositionSideDisplay(position_side);
-        
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
-            <Tag color={orderSideColor} style={{ margin: 0, fontSize: '11px' }}>
-              {side}
-            </Tag>
-            <Tag color={positionDisplay.color} style={{ margin: 0, fontSize: '11px' }}>
-              {positionDisplay.text}
-            </Tag>
-          </div>
-        );
-      }
-    },
-    {
-      title: '交易含义',
-      key: 'trade_meaning',
       width: 100,
       render: (_, record) => {
         const { side, position_side } = record;

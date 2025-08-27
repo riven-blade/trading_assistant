@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -25,6 +26,10 @@ func main() {
 
 	// 初始化Redis
 	if err := redis.InitRedis(); err != nil {
+		// 发送错误通知
+		if telegram.GlobalTelegramClient != nil {
+			telegram.GlobalTelegramClient.SendServiceStatus("error", fmt.Sprintf("Redis初始化失败\n错误: %v\n服务即将停止", err))
+		}
 		logrus.Fatalf("Redis init fail: %v", err)
 	}
 
@@ -47,6 +52,10 @@ func main() {
 
 	binanceClient, err := binance.New(binanceConfig)
 	if err != nil {
+		// 发送错误通知
+		if telegram.GlobalTelegramClient != nil {
+			telegram.GlobalTelegramClient.SendServiceStatus("error", fmt.Sprintf("Binance客户端初始化失败\n错误: %v\n服务即将停止", err))
+		}
 		logrus.Fatalf("Binance client init fail: %v", err)
 	}
 	logrus.Info("Binance客户端已初始化")
@@ -124,6 +133,13 @@ func gracefulShutdown(server *servers.HTTPServer, binanceClient *binance.Binance
 	// 停止WebSocket连接
 	if binanceClient != nil {
 		binanceClient.StopWebSocket()
+	}
+
+	// 发送服务完全停止的Telegram通知
+	if telegram.GlobalTelegramClient != nil {
+		if err := telegram.GlobalTelegramClient.SendServiceStatus("stopped", "交易助手已关闭"); err != nil {
+			logrus.Errorf("发送关闭完成通知失败: %v", err)
+		}
 	}
 
 	logrus.Info("交易助手已关闭")
