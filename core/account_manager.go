@@ -26,6 +26,11 @@ type AccountManager struct {
 	balanceDebounceTimer  *time.Timer // 余额更新防抖动定时器
 	positionDebounceTimer *time.Timer // 仓位更新防抖动定时器
 	debounceMutex         sync.Mutex  // 定时器锁
+
+	// 兜底定时器
+	fallbackTimer    *time.Timer   // 兜底定时器，每30分钟执行一次数据同步
+	fallbackInterval time.Duration // 兜底定时器间隔
+	fallbackMutex    sync.Mutex    // 兜底定时器锁
 }
 
 // GlobalAccountManager 全局账户管理器实例
@@ -40,6 +45,9 @@ func InitAccountManager(binanceClient *binance.Binance) {
 		// 初始化防抖动定时器（还未启动）
 		balanceDebounceTimer:  nil,
 		positionDebounceTimer: nil,
+		// 初始化兜底定时器（30分钟间隔）
+		fallbackTimer:    nil,
+		fallbackInterval: 30 * time.Minute,
 	}
 }
 
@@ -63,6 +71,9 @@ func (am *AccountManager) Start() {
 
 	// 启动用户数据流WebSocket监听
 	go am.startUserDataStream()
+
+	// 启动兜底定时器
+	go am.startFallbackTimer()
 }
 
 // Stop 停止账户监控
@@ -84,6 +95,9 @@ func (am *AccountManager) Stop() {
 
 	// 清理防抖动定时器
 	am.cleanupDebounceTimers()
+
+	// 停止兜底定时器
+	am.stopFallbackTimer()
 
 	am.stopChan <- true
 	logrus.Info("账户监控已停止")
@@ -149,7 +163,8 @@ func (am *AccountManager) startUserDataStream() {
 
 // handleUserDataMessage 处理用户数据流消息
 func (am *AccountManager) handleUserDataMessage(metadata types.MetaData, data interface{}) error {
-	logrus.Infof("收到用户数据流消息，类型: %s", metadata.DataType)
+	logrus.Infof("AccountManager收到用户数据流消息，数据类型: %s, 交易所: %s, 时间戳: %d",
+		metadata.DataType, metadata.Exchange, metadata.Timestamp)
 
 	switch metadata.DataType {
 	case "account":
@@ -188,6 +203,97 @@ func (am *AccountManager) cleanupDebounceTimers() {
 		am.positionDebounceTimer.Stop()
 		am.positionDebounceTimer = nil
 		logrus.Debug("仓位防抖动定时器已清理")
+	}
+}
+
+// startFallbackTimer 启动兜底定时器
+func (am *AccountManager) startFallbackTimer() {
+	am.fallbackMutex.Lock()
+	defer am.fallbackMutex.Unlock()
+
+	// 如果AccountManager已停止，不创建新的定时器
+	if !am.running {
+		logrus.Debug("AccountManager已停止，跳过兜底定时器启动")
+		return
+	}
+
+	// 如果已有定时器，停止它
+	if am.fallbackTimer != nil {
+		am.fallbackTimer.Stop()
+	}
+
+	// 创建新的兜底定时器，30分钟后执行
+	am.fallbackTimer = time.AfterFunc(am.fallbackInterval, func() {
+		// 检查AccountManager是否还在运行
+		if !am.running {
+			logrus.Debug("AccountManager已停止，跳过兜底数据同步")
+			return
+		}
+
+		logrus.Info("兜底定时器触发，开始执行数据同步...")
+
+		// 执行余额和仓位的同步
+		am.refreshBalances()
+		am.refreshPositions()
+
+		// 重新启动定时器
+		if am.running {
+			go am.startFallbackTimer()
+		}
+	})
+
+	logrus.Infof("兜底定时器已启动，将在 %v 后执行数据同步", am.fallbackInterval)
+}
+
+// resetFallbackTimer 重置兜底定时器
+func (am *AccountManager) resetFallbackTimer() {
+	am.fallbackMutex.Lock()
+	defer am.fallbackMutex.Unlock()
+
+	// 如果AccountManager已停止，不创建新的定时器
+	if !am.running {
+		logrus.Debug("AccountManager已停止，跳过兜底定时器重置")
+		return
+	}
+
+	// 如果已有定时器，停止它
+	if am.fallbackTimer != nil {
+		am.fallbackTimer.Stop()
+	}
+
+	// 创建新的兜底定时器，重新开始30分钟倒计时
+	am.fallbackTimer = time.AfterFunc(am.fallbackInterval, func() {
+		// 检查AccountManager是否还在运行
+		if !am.running {
+			logrus.Debug("AccountManager已停止，跳过兜底数据同步")
+			return
+		}
+
+		logrus.Info("兜底定时器触发，开始执行数据同步...")
+
+		// 执行余额和仓位的同步
+		am.refreshBalances()
+		am.refreshPositions()
+
+		// 重新启动定时器（如果AccountManager还在运行）
+		if am.running {
+			go am.startFallbackTimer()
+		}
+	})
+
+	logrus.Debug("兜底定时器已重置，重新开始30分钟倒计时")
+}
+
+// stopFallbackTimer 停止兜底定时器
+func (am *AccountManager) stopFallbackTimer() {
+	am.fallbackMutex.Lock()
+	defer am.fallbackMutex.Unlock()
+
+	// 停止并清理兜底定时器
+	if am.fallbackTimer != nil {
+		am.fallbackTimer.Stop()
+		am.fallbackTimer = nil
+		logrus.Debug("兜底定时器已停止")
 	}
 }
 
@@ -249,14 +355,16 @@ func (am *AccountManager) debouncePositionUpdate() {
 
 // handleAccountUpdate 处理账户更新事件
 func (am *AccountManager) handleAccountUpdate(accountUpdate *types.WatchAccountUpdate) error {
-	logrus.Infof("收到账户更新事件，余额数量: %d，持仓数量: %d",
-		len(accountUpdate.Balances), len(accountUpdate.Positions))
+	logrus.Infof("收到账户更新事件，事件类型: %s, 余额数量: %d，持仓数量: %d, 事件时间: %d",
+		accountUpdate.EventType, len(accountUpdate.Balances), len(accountUpdate.Positions), accountUpdate.EventTime)
 
 	if len(accountUpdate.Balances) > 0 {
+		logrus.Infof("检测到余额变化，启动防抖动余额更新，余额变化数量: %d", len(accountUpdate.Balances))
 		go am.debounceBalanceUpdate()
 	}
 
 	if len(accountUpdate.Positions) > 0 {
+		logrus.Infof("检测到持仓变化，启动防抖动持仓更新，持仓变化数量: %d", len(accountUpdate.Positions))
 		go am.debouncePositionUpdate()
 	}
 	return nil
@@ -353,6 +461,7 @@ func (am *AccountManager) refreshBalances() {
 	}
 
 	// 通过WebSocket广播余额更新
+	logrus.Infof("准备广播余额更新，净值: %.2f USDT", balanceSummary["net_value"])
 	go am.broadcastBalanceUpdate(balanceSummary)
 
 	// 广播余额更新事件
@@ -368,6 +477,9 @@ func (am *AccountManager) refreshBalances() {
 	})
 
 	logrus.Info("余额数据刷新完成")
+
+	// 重置兜底定时器
+	go am.resetFallbackTimer()
 }
 
 // refreshPositions 刷新持仓数据并缓存到Redis
@@ -458,6 +570,7 @@ func (am *AccountManager) refreshPositions() {
 	}
 
 	// 通过WebSocket广播持仓更新
+	logrus.Infof("准备广播持仓更新，持仓数量: %d, 总盈亏: %.4f USDT", len(mps), totalPnl)
 	go am.broadcastAccountUpdate(mps, totalPnl)
 
 	// 广播持仓更新事件
@@ -472,6 +585,9 @@ func (am *AccountManager) refreshPositions() {
 	})
 
 	logrus.Info("持仓数据刷新完成")
+
+	// 重置兜底定时器
+	go am.resetFallbackTimer()
 }
 
 // ensurePositionCoinsSelected 确保有仓位的币种被自动选中

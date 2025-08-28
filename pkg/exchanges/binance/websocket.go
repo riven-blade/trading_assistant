@@ -1027,8 +1027,6 @@ func (ws *WebSocket) connectUserDataStream() error {
 		ws.handleReconnectEvent(attempt, err)
 	})
 
-	// 连接已经在NewWebSocketConnection中启动
-
 	ws.userDataConnection = conn
 	logrus.Info("用户数据流连接成功")
 	return nil
@@ -1037,17 +1035,20 @@ func (ws *WebSocket) connectUserDataStream() error {
 // handleUserDataMessage 处理用户数据流消息
 func (ws *WebSocket) handleUserDataMessage(data []byte) error {
 	if ws.userDataPublishFunc == nil {
+		logrus.Warnf("用户数据流发布函数为空，跳过消息处理")
 		return nil
 	}
 
 	var msg map[string]interface{}
 	if err := json.Unmarshal(data, &msg); err != nil {
+		logrus.Errorf("用户数据流消息JSON解析失败: %v", err)
 		return err
 	}
 
 	// 获取事件类型
 	eventType, _ := msg[FieldEventType].(string)
 	if eventType == "" {
+		logrus.Warnf("用户数据流消息缺少事件类型，跳过处理")
 		return nil
 	}
 
@@ -1058,11 +1059,16 @@ func (ws *WebSocket) handleUserDataMessage(data []byte) error {
 		parsedData = ws.parseAccountUpdate(msg)
 	case EventTypeOrderTradeUpdate:
 		parsedData = ws.parseOrderTradeUpdate(msg)
+	case "TRADE_LITE":
+		// TRADE_LITE事件暂时跳过处理
+		return nil
 	default:
+		logrus.Debugf("未知的用户数据流事件类型: %s, 跳过处理", eventType)
 		return nil
 	}
 
 	if parsedData == nil {
+		logrus.Warnf("用户数据流消息解析结果为空，事件类型: %s", eventType)
 		return nil
 	}
 
@@ -1075,7 +1081,11 @@ func (ws *WebSocket) handleUserDataMessage(data []byte) error {
 	}
 
 	// 调用发布函数
-	return ws.userDataPublishFunc(metaData, parsedData)
+	if err := ws.userDataPublishFunc(metaData, parsedData); err != nil {
+		logrus.Errorf("用户数据流发布函数调用失败: %v", err)
+		return err
+	}
+	return nil
 }
 
 // keepaliveListenKey 保持listenKey活跃
@@ -1092,9 +1102,11 @@ func (ws *WebSocket) keepaliveListenKey() {
 		case <-ticker.C:
 			if ws.userDataListenKey != "" && ws.exchange != nil {
 				if err := ws.exchange.KeepaliveListenKey(ws.userDataListenKey); err != nil {
-					logrus.Errorf("刷新listenKey失败: %v", err)
+					logrus.Errorf("刷新listenKey失败: %v, 将重新创建连接", err)
+					// 刷新失败时重新创建连接
+					go ws.recreateUserDataConnection()
 				} else {
-					logrus.Debug("listenKey刷新成功")
+					logrus.Info("listenKey刷新成功")
 				}
 			}
 		}
@@ -1109,6 +1121,35 @@ func (ws *WebSocket) getUserDataWebSocketURL() string {
 	}
 
 	return "wss://fstream.binance.com/ws"
+}
+
+// recreateUserDataConnection 重新创建用户数据流连接
+func (ws *WebSocket) recreateUserDataConnection() {
+	logrus.Warn("开始重新创建用户数据流连接")
+
+	// 关闭当前连接
+	if ws.userDataConnection != nil {
+		ws.userDataConnection.Close()
+		ws.userDataConnection = nil
+	}
+
+	// 创建新的listenKey
+	if ws.exchange != nil {
+		if newListenKey, err := ws.exchange.CreateListenKey(); err == nil {
+			ws.userDataListenKey = newListenKey
+			logrus.Infof("重新创建listenKey成功: %s", newListenKey[:16]+"...")
+		} else {
+			logrus.Errorf("重新创建listenKey失败: %v", err)
+			return
+		}
+	}
+
+	// 尝试重新连接
+	if err := ws.connectUserDataStream(); err != nil {
+		logrus.Errorf("重新创建用户数据流连接失败: %v", err)
+	} else {
+		logrus.Info("用户数据流连接重新创建成功")
+	}
 }
 
 // SetReconnectHandler 设置重连事件处理器
