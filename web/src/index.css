@@ -39,9 +39,12 @@ code {
 
 /* 清爽Logo设计 */
 .logo-container {
-  padding: 20px 16px;
+  padding: 20px 12px;
   margin-bottom: 12px;
   border-bottom: 1px solid #e5e7eb;
+  overflow: hidden;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .logo {
@@ -1335,17 +1338,33 @@ code {
 
 /* === 清爽侧边栏主题 === */
 
+/* 侧边栏容器 */
+.ant-layout-sider {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+}
+
+.ant-layout-sider .ant-layout-sider-children {
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  max-width: 100%;
+}
+
 /* 侧边栏菜单 */
 .sidebar-menu-clean.ant-menu-light {
   background: transparent;
   border: none;
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
 }
 
 .sidebar-menu-clean .ant-menu-item {
   background: transparent;
   border-radius: 8px;
-  margin: 3px 12px;
-  padding: 0 16px;
+  margin: 3px 8px;
+  padding: 0 12px;
   height: 40px;
   line-height: 40px;
   color: #6b7280;
@@ -1353,17 +1372,26 @@ code {
   border: none;
   font-size: 14px;
   font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-menu-clean .ant-menu-item:hover {
   background: #f3f4f6;
   color: #374151;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-menu-clean .ant-menu-item.ant-menu-item-selected {
   background: #f0f9ff;
   color: #0369a1;
   border: 1px solid rgba(14, 165, 233, 0.2);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .sidebar-menu-clean .ant-menu-item.ant-menu-item-selected:hover {
@@ -1380,12 +1408,13 @@ code {
 
 /* 收缩状态 */
 .ant-layout-sider-collapsed .sidebar-menu-clean .ant-menu-item {
-  margin: 3px 8px;
+  margin: 3px 6px;
   padding: 0;
   display: flex;
   align-items: center;
   justify-content: center;
   text-align: center;
+  overflow: hidden;
 }
 
 .ant-layout-sider-collapsed .sidebar-menu-clean .ant-menu-item .anticon {
@@ -1397,13 +1426,16 @@ code {
 .ant-drawer .sidebar-menu-clean .ant-menu-item {
   background: transparent;
   border-radius: 8px;
-  margin: 3px 12px;
-  padding: 0 16px;
+  margin: 3px 8px;
+  padding: 0 12px;
   height: 40px;
   line-height: 40px;
   color: #6b7280;
   transition: all 0.15s ease;
   font-weight: 500;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .ant-drawer .sidebar-menu-clean .ant-menu-item:hover {

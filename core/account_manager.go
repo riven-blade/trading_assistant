@@ -119,7 +119,7 @@ func (am *AccountManager) initializeData() {
 
 	// 主动获取初始余额数据
 	logrus.Info("正在获取初始余额数据...")
-	am.refreshBalances()
+	am.refreshBalances(false)
 
 	// 清除旧的持仓数据
 	logrus.Info("清除Redis中的旧持仓数据...")
@@ -129,7 +129,7 @@ func (am *AccountManager) initializeData() {
 
 	// 主动获取初始持仓数据
 	logrus.Info("正在获取初始持仓数据...")
-	am.refreshPositions()
+	am.refreshPositions(false)
 
 	logrus.Info("账户数据初始化完成")
 }
@@ -232,9 +232,9 @@ func (am *AccountManager) startFallbackTimer() {
 
 		logrus.Info("兜底定时器触发，开始执行数据同步...")
 
-		// 执行余额和仓位的同步
-		am.refreshBalances()
-		am.refreshPositions()
+		// 执行余额和仓位的同步（定时器触发，跳过TG通知）
+		am.refreshBalances(true)
+		am.refreshPositions(true)
 
 		// 重新启动定时器
 		if am.running {
@@ -271,9 +271,9 @@ func (am *AccountManager) resetFallbackTimer() {
 
 		logrus.Info("兜底定时器触发，开始执行数据同步...")
 
-		// 执行余额和仓位的同步
-		am.refreshBalances()
-		am.refreshPositions()
+		// 执行余额和仓位的同步（定时器触发，跳过TG通知）
+		am.refreshBalances(true)
+		am.refreshPositions(true)
 
 		// 重新启动定时器（如果AccountManager还在运行）
 		if am.running {
@@ -321,7 +321,7 @@ func (am *AccountManager) debounceBalanceUpdate() {
 			return
 		}
 		logrus.Info("防抖动延迟后执行余额刷新")
-		am.refreshBalances()
+		am.refreshBalances(false)
 	})
 }
 
@@ -349,7 +349,7 @@ func (am *AccountManager) debouncePositionUpdate() {
 			return
 		}
 		logrus.Info("防抖动延迟后执行仓位刷新")
-		am.refreshPositions()
+		am.refreshPositions(false)
 	})
 }
 
@@ -371,7 +371,7 @@ func (am *AccountManager) handleAccountUpdate(accountUpdate *types.WatchAccountU
 }
 
 // refreshBalances 刷新余额数据并缓存到Redis
-func (am *AccountManager) refreshBalances() {
+func (am *AccountManager) refreshBalances(skipTelegram bool) {
 	if am.binanceClient == nil {
 		logrus.Error("Binance客户端未初始化，无法刷新余额")
 		return
@@ -453,8 +453,8 @@ func (am *AccountManager) refreshBalances() {
 		}
 	}
 
-	// 发送Telegram通知
-	if telegram.GlobalTelegramClient != nil {
+	// 发送Telegram通知（根据skipTelegram参数决定是否发送）
+	if !skipTelegram && telegram.GlobalTelegramClient != nil {
 		message := fmt.Sprintf("余额 %.2f USDT | 可用 %.2f | 持仓 %d",
 			balanceSummary["net_value"], balanceSummary["usdt_free"], positionCount)
 		telegram.GlobalTelegramClient.SendMessage(message)
@@ -483,7 +483,7 @@ func (am *AccountManager) refreshBalances() {
 }
 
 // refreshPositions 刷新持仓数据并缓存到Redis
-func (am *AccountManager) refreshPositions() {
+func (am *AccountManager) refreshPositions(skipTelegram bool) {
 	if am.binanceClient == nil {
 		logrus.Error("Binance客户端未初始化，无法刷新持仓")
 		return
@@ -563,7 +563,7 @@ func (am *AccountManager) refreshPositions() {
 	}
 
 	// 发送Telegram通知
-	if telegram.GlobalTelegramClient != nil {
+	if !skipTelegram && telegram.GlobalTelegramClient != nil {
 		message := fmt.Sprintf("持仓 %d | PNL %.4f",
 			len(mps), totalPnl)
 		telegram.GlobalTelegramClient.SendMessage(message)

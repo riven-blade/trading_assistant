@@ -10,8 +10,6 @@ import {
   BarChartOutlined,
   LineChartOutlined,
   ReloadOutlined,
-  FullscreenOutlined,
-  FullscreenExitOutlined,
   SettingOutlined,
   ApartmentOutlined
 } from '@ant-design/icons';
@@ -41,8 +39,6 @@ const ChartToolbar = ({
   onOpenIndicatorPanel,
   selectedIndicators = [],
   loading = false,
-  isFullscreen = false,
-  onToggleFullscreen,
   onToggleVolume,
   priceEstimatesCount = 0,
   hasAnyEstimate = false,
@@ -515,40 +511,6 @@ const ChartToolbar = ({
           }}
         >
           <ReloadOutlined spin={loading} style={{ fontSize: isMobile ? '16px' : '13px' }} />
-        </button>
-        
-        {/* 全屏按钮 */}
-        <button
-          onClick={onToggleFullscreen}
-          style={{
-            padding: isMobile ? '8px' : '6px',
-            border: 'none',
-            borderRadius: '4px',
-            backgroundColor: isFullscreen ? 'rgba(24, 144, 255, 0.1)' : 'transparent',
-            color: isFullscreen ? '#1890ff' : '#666',
-            cursor: 'pointer',
-            transition: 'all 0.15s',
-            minHeight: isMobile ? '40px' : '32px',
-            minWidth: isMobile ? '40px' : '32px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center'
-          }}
-          onMouseEnter={(e) => {
-            if (!isFullscreen) {
-              e.target.style.backgroundColor = 'rgba(0,0,0,0.04)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (!isFullscreen) {
-              e.target.style.backgroundColor = 'transparent';
-            }
-          }}
-        >
-          {isFullscreen ? 
-            <FullscreenExitOutlined style={{ fontSize: isMobile ? '16px' : '13px' }} /> : 
-            <FullscreenOutlined style={{ fontSize: isMobile ? '16px' : '13px' }} />
-          }
         </button>
       </div>
     </div>

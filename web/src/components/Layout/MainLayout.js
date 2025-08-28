@@ -111,7 +111,7 @@ const MainLayout = ({ children, onLogout }) => {
           collapsible 
           collapsed={collapsed}
           style={{
-            overflow: 'auto',
+            overflow: 'hidden auto',
             height: '100vh',
             position: 'fixed',
             left: 0,

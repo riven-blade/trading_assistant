@@ -168,12 +168,11 @@ const ChartPage = () => {
   const [loading, setLoading] = useState(false);
   const [klineData, setKlineData] = useState([]);
   
-  // 指标相关状态
-  const [selectedIndicators, setSelectedIndicators] = useState([]);
+  // 指标相关状态 - 默认选中成交量指标
+  const [selectedIndicators, setSelectedIndicators] = useState(['VOL']);
   
   // UI状态管理
   const [indicatorPanelVisible, setIndicatorPanelVisible] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   
   // 图表引用
@@ -207,16 +206,26 @@ const ChartPage = () => {
     }
   }, [getUrlParams, selectedCoin, selectedInterval]);
 
-  // 移动端检测
+  // 移动端检测和窗口大小变化监听
   useEffect(() => {
     const checkIsMobile = () => {
       setIsMobile(window.innerWidth < 768);
     };
 
+    const handleResize = () => {
+      checkIsMobile();
+      // 窗口大小变化时重新调整面板高度
+      if (chartInitialized && chartInstanceRef.current) {
+        setTimeout(() => {
+          adjustPaneHeights();
+        }, 200);
+      }
+    };
+
     checkIsMobile();
-    window.addEventListener('resize', checkIsMobile);
-    return () => window.removeEventListener('resize', checkIsMobile);
-  }, []);
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [chartInitialized]);
 
   // 获取选中的币种列表
   const fetchSelectedCoins = useCallback(async () => {
@@ -678,6 +687,13 @@ const ChartPage = () => {
             }
           });
           
+          // 创建成交量指标
+          try {
+            chartInstanceRef.current.createIndicator('VOL', false);
+          } catch (error) {
+            console.error('创建成交量指标失败:', error);
+          }
+          
 
 
           setChartInitialized(true);
@@ -762,35 +778,33 @@ const ChartPage = () => {
       if (chartRef.current && !chartInstanceRef.current) {
         setTimeout(() => {
           if (chartRef.current && !chartInstanceRef.current) {
-            try {
-              chartInstanceRef.current = init(chartRef.current);
-              if (chartInstanceRef.current) {
-                // 设置基本样式，包括成交量显示
-                chartInstanceRef.current.setStyles({
-                  candle: { 
-                    margin: { top: 0.05, bottom: 0.05 }
-                  },
-                  grid: { 
-                    show: true, 
-                    horizontal: { show: true }, 
-                    vertical: { show: true } 
-                  },
-                  // 启用成交量显示
-                  volume: {
-                    show: true,
-                    bar: {
-                      upColor: '#11B981',
-                      downColor: '#EF4444',
-                      noChangeColor: '#6B7280'
+                          try {
+                chartInstanceRef.current = init(chartRef.current);
+                if (chartInstanceRef.current) {
+                  // 设置基本样式，包括成交量显示
+                  chartInstanceRef.current.setStyles({
+                    candle: { 
+                      margin: { top: 0.05, bottom: 0.05 }
+                    },
+                    grid: { 
+                      show: true, 
+                      horizontal: { show: true }, 
+                      vertical: { show: true } 
                     }
-                  }
-                });
+                  });
 
-                setChartInitialized(true);
+                  // 创建成交量指标，确保默认显示
+                  try {
+                    chartInstanceRef.current.createIndicator('VOL', false);
+                  } catch (volError) {
+                    console.error('创建成交量指标失败:', volError);
+                  }
+
+                  setChartInitialized(true);
+                }
+              } catch (error) {
+                console.error('主动初始化图表失败:', error);
               }
-            } catch (error) {
-              console.error('主动初始化图表失败:', error);
-            }
           }
         }, 100);
       }
@@ -810,10 +824,10 @@ const ChartPage = () => {
       try {
         chartInstanceRef.current.applyNewData(formattedData);
         
-        // 调整面板高度，确保成交量可见
+        // 调整面板高度，确保成交量可见 - 增加延迟确保图表完全初始化
         setTimeout(() => {
           adjustPaneHeights();
-        }, 100);
+        }, 300);
       } catch (error) {
         console.error('更新图表数据失败:', error);
         message.error('更新图表数据失败');
@@ -854,6 +868,16 @@ const ChartPage = () => {
       const timer = setTimeout(() => {
         if (chartInstanceRef.current) {
           applyAllIndicators();
+          
+          // 指标变化后重新调整面板高度，确保成交量始终可见
+          setTimeout(() => {
+            adjustPaneHeights();
+            
+            // 最终确保成交量可见
+            setTimeout(() => {
+              adjustPaneHeights();
+            }, 200);
+          }, 100);
         }
       }, 200);
       
@@ -861,58 +885,61 @@ const ChartPage = () => {
     }
   }, [selectedIndicators, chartInitialized, applyAllIndicators]);
 
-  // 调整面板高度
+  // 简化的面板高度设置 - 在固定容器内分配比例
   const adjustPaneHeights = () => {
+    if (!chartInstanceRef.current) {
+      console.log('图表实例不存在');
+      return;
+    }
+    
     try {
-      // 使用固定的面板ID来设置高度，确保成交量完全可见
+      const isMobileDevice = window.innerWidth < 768;
+      
+      // 固定比例分配 - 简单有效
+      const candleHeight = isMobileDevice ? 0.65 : 0.7;   // 主图65-70%
+      const volumeHeight = isMobileDevice ? 0.35 : 0.3;   // 成交量30-35%
+      
+      console.log(`📊 面板比例分配: 主图=${candleHeight}, 成交量=${volumeHeight}`);
+      
+      // 直接设置比例，不设置minHeight避免冲突
       chartInstanceRef.current.setPaneOptions('candle_pane', { 
-        height: 0.75 
+        height: candleHeight
       });
-      // 设置成交量面板高度 - 增加高度确保完全可见
+      
+      // 延迟设置成交量面板
       setTimeout(() => {
         try {
           chartInstanceRef.current.setPaneOptions('volume_pane', { 
-            height: 0.2,
-            minHeight: 120
+            height: volumeHeight
           });
+          console.log('✅ 成交量面板比例设置完成');
         } catch (e) {
-          // 忽略设置错误
+          console.error('❌ 设置成交量面板失败:', e);
         }
-      }, 100);
+      }, 50);
+      
     } catch (error) {
-      // 忽略调整错误
+      console.error('❌ 面板高度调整失败:', error);
     }
   };
 
-  // 全屏状态管理
-  const toggleFullscreen = useCallback(() => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(console.error);
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch(console.error);
-      }
-    }
-  }, []);
+
 
   // 成交量快捷切换 - 清空所有指标，只保留成交量
   const toggleVolume = useCallback(() => {
     // 不管当前什么配置，都只保留成交量指标
     const newSelectedIndicators = ['VOL'];
     setSelectedIndicators(newSelectedIndicators);
-  }, []);
+    
+    // 立即调整面板高度，确保成交量可见
+    setTimeout(() => {
+      if (chartInitialized && chartInstanceRef.current) {
+        adjustPaneHeights();
+      }
+    }, 200);
+  }, [chartInitialized]);
 
-  // 监听全屏状态变化
-  useEffect(() => {
-    const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
-    };
 
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
-  }, []);
 
   // 键盘快捷键
   useEffect(() => {
@@ -929,8 +956,6 @@ const ChartPage = () => {
         case 'escape':
           if (indicatorPanelVisible) {
             setIndicatorPanelVisible(false);
-          } else if (isFullscreen) {
-            toggleFullscreen();
           }
           break;
         default:
@@ -940,7 +965,7 @@ const ChartPage = () => {
 
     document.addEventListener('keydown', handleKeyPress);
     return () => document.removeEventListener('keydown', handleKeyPress);
-  }, [indicatorPanelVisible, isFullscreen, toggleFullscreen]);
+  }, [indicatorPanelVisible]);
 
   // 组件初始化
   useEffect(() => {
@@ -1035,7 +1060,7 @@ const ChartPage = () => {
 
   return (
     <div style={{ 
-      height: '100vh',
+      height: '100%',  // 适配父容器
       background: '#fafbfc',
       display: 'flex',
       flexDirection: 'column',
@@ -1057,8 +1082,6 @@ const ChartPage = () => {
           onCoinChange={handleCoinChange}
           selectedInterval={selectedInterval}
           onIntervalChange={handleIntervalChange}
-          isFullscreen={isFullscreen}
-          onToggleFullscreen={toggleFullscreen}
           onRefresh={handleRefresh}
           onOpenIndicatorPanel={() => setIndicatorPanelVisible(true)}
           selectedIndicators={selectedIndicators}
@@ -1078,15 +1101,13 @@ const ChartPage = () => {
           positionsLoading={positionsLoading}
         />
         
-        {/* 图表容器 */}
+        {/* 图表容器 - 适配窗口高度 */}
         <div 
           className="kline-chart-container"
           style={{ 
-            flex: 1, 
+            height: isMobile ? 'calc(100% - 120px)' : 'calc(100% - 40px)',
             position: 'relative', 
             background: '#ffffff',
-            minHeight: isMobile ? '300px' : '500px',
-            height: isMobile ? 'calc(100vh - 160px)' : 'calc(100vh - 85px)', 
             overflow: 'hidden',
             margin: isMobile ? '0 4px 4px 4px' : '0 8px 8px 8px',
             borderRadius: '8px',
