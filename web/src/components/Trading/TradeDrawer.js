@@ -62,7 +62,7 @@ const TradeDrawer = ({
   // 获取价格范围 (当前价格的 ±20%)
   const getPriceRange = () => {
     if (!markPrice) return [0, 100];
-    const range = markPrice * 0.2;
+    const range = markPrice * 0.5;
     return [markPrice - range, markPrice + range];
   };
 
@@ -72,7 +72,7 @@ const TradeDrawer = ({
     <Drawer
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>{side === 'long' ? '开多' : '开空'} {symbol}</span>
+          <span>{side === 'long' ? '开多' : '开空'} {symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol}</span>
           <Tag color={side === 'long' ? 'green' : 'red'}>
             {side === 'long' ? 'LONG' : 'SHORT'}
           </Tag>

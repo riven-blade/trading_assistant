@@ -118,6 +118,13 @@ const Positions = () => {
       return;
     }
     
+    // 处理K线图跳转
+    if (action === 'kline') {
+      const klineUrl = `${window.location.origin}/klines?symbol=${position.symbol}&interval=1d`;
+      window.open(klineUrl, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    
     const config = ACTIONS[action];
     if (!config) {
       console.error('handleAction: 未知的操作类型:', action);

@@ -70,6 +70,36 @@ export const ACTION_TYPE_TEXT = {
   'stop_loss': '止损'
 };
 
+// 详细操作类型文本映射
+export const DETAILED_ACTION_TYPE_TEXT = {
+  // 开仓类型
+  'open_long': '做多开仓',
+  'open_short': '做空开仓',
+  
+  // 加仓类型
+  'addition_long': '做多加仓',
+  'addition_short': '做空加仓',
+  
+  // 平仓类型
+  'close_long': '多头平仓',
+  'close_short': '空头平仓',
+  
+  // 止盈类型
+  'take_profit_long': '多头止盈',
+  'take_profit_short': '空头止盈',
+  
+  // 止损类型
+  'stop_loss_long': '多头止损',
+  'stop_loss_short': '空头止损'
+};
+
+// 根据action_type和side获取详细操作类型文本
+export const getDetailedActionText = (actionType, side) => {
+  const sideKey = side === 'long' ? 'long' : 'short';
+  const key = `${actionType}_${sideKey}`;
+  return DETAILED_ACTION_TYPE_TEXT[key] || ACTION_TYPE_TEXT[actionType] || actionType;
+};
+
 // 默认配置
 export const DEFAULT_CONFIG = {
   leverage: 3,

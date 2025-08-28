@@ -226,7 +226,7 @@ const Orders = () => {
       dataIndex: 'symbol',
       key: 'symbol',
       width: 100,
-      render: (symbol) => <Text strong>{symbol}</Text>
+      render: (symbol) => <Text strong>{symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol}</Text>
     },
     {
       title: '方向',
@@ -381,7 +381,7 @@ const Orders = () => {
       dataIndex: 'symbol',
       key: 'symbol',
       width: 100,
-      render: (symbol) => <Text strong>{symbol}</Text>
+      render: (symbol) => <Text strong>{symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol}</Text>
     },
     {
       title: '方向',

@@ -81,6 +81,9 @@ LOG_LEVEL=info
 # 交易配置
 POSITION_MODE=both  # both: 双向持仓, single: 单向持仓
 # 保证金模式现在支持每个订单单独配置
+
+# 风险管理配置
+BALANCE_RATIO_THRESHOLD=20.0  # 余额比例阈值，当可用余额/总余额 < 此值时停止开仓和加仓（默认20%）
 ```
 
 ### 5. 启动服务

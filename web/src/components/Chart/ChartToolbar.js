@@ -128,7 +128,7 @@ const ChartToolbar = ({
         >
           {coins.map(coin => (
             <Option key={coin.symbol} value={coin.symbol}>
-              {coin.symbol}
+              {coin.symbol && coin.symbol.length > 8 ? coin.symbol.substring(0, 8) + '...' : coin.symbol}
             </Option>
           ))}
         </Select>

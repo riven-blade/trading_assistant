@@ -1666,19 +1666,79 @@ code {
   text-transform: uppercase;
 }
 
-.monitoring-action-tag.addition {
-  background: #f0f9ff;
-  color: #0369a1;
-}
-
-.monitoring-action-tag.take_profit {
+/* 做多开仓 - 绿色（看涨） */
+.monitoring-action-tag.open.long {
   background: #f0fdf4;
   color: #166534;
 }
 
-.monitoring-action-tag.stop_loss {
+/* 做空开仓 - 红色（看跌） */
+.monitoring-action-tag.open.short {
   background: #fef2f2;
   color: #991b1b;
+}
+
+/* 做多加仓 - 深绿色（积极看涨） */
+.monitoring-action-tag.addition.long {
+  background: #dcfce7;
+  color: #14532d;
+}
+
+/* 做空加仓 - 深红色（积极看跌） */
+.monitoring-action-tag.addition.short {
+  background: #fee2e2;
+  color: #7f1d1d;
+}
+
+/* 多头止盈 - 蓝绿色（多头盈利） */
+.monitoring-action-tag.take_profit.long {
+  background: #f0fdfa;
+  color: #065f46;
+}
+
+/* 空头止盈 - 蓝绿色（空头盈利） */
+.monitoring-action-tag.take_profit.short {
+  background: #f0fdfa;
+  color: #065f46;
+}
+
+/* 多头止损 - 橙色（多头保护） */
+.monitoring-action-tag.stop_loss.long {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+/* 空头止损 - 橙色（空头保护） */
+.monitoring-action-tag.stop_loss.short {
+  background: #fff7ed;
+  color: #c2410c;
+}
+
+/* 平仓操作 - 紫色（中性结束） */
+.monitoring-action-tag.close {
+  background: #faf5ff;
+  color: #7c3aed;
+}
+
+.monitoring-action-tag.close.long {
+  background: #faf5ff;
+  color: #7c3aed;
+}
+
+.monitoring-action-tag.close.short {
+  background: #faf5ff;
+  color: #7c3aed;
+}
+
+/* 默认样式（备用） */
+.monitoring-action-tag.open {
+  background: #f0f9ff;
+  color: #0369a1;
+}
+
+.monitoring-action-tag.addition {
+  background: #f0f9ff;
+  color: #0369a1;
 }
 
 .monitoring-order-type {
@@ -1858,8 +1918,8 @@ code {
 /* 监听数量徽章样式 */
 .monitor-count-badge {
   position: absolute;
-  top: -6px;
-  right: -6px;
+  top: -4px;
+  right: 4px;
   background: #ff4d4f;
   color: white;
   border-radius: 50%;

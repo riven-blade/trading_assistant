@@ -10,6 +10,7 @@ import { LineChartOutlined } from '@ant-design/icons';
  * @param {Function} hasPosition - 检查是否有仓位
  * @param {Function} hasAnyPosition - 检查是否有任意仓位
  * @param {Function} hasAnyEstimate - 检查是否有监听
+ * @param {Function} hasOpenEstimate - 检查是否有开仓监听
  * @param {Object} symbolEstimates - 监听数量映射
  * @param {Function} canDeleteSymbol - 检查是否可删除
  * @param {Function} getDeleteDisabledReason - 获取删除禁用原因
@@ -22,6 +23,7 @@ const TradingPairCard = ({
   hasPosition,
   hasAnyPosition,
   hasAnyEstimate,
+  hasOpenEstimate,
   symbolEstimates,
   canDeleteSymbol,
   getDeleteDisabledReason,
@@ -51,10 +53,19 @@ const TradingPairCard = ({
       {/* 头部信息 */}
       <div className="trading-header-clean">
         <div className="trading-info-row">
-          <span className="trading-symbol-clean">{symbol}</span>
+          <span className="trading-symbol-clean">
+            {symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol}
+          </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
             {hasAnyEstimate(symbol) && (
-              <Tag size="small" color="blue" className="estimate-badge">
+              <Tag 
+                size="small" 
+                color="blue" 
+                className="estimate-badge" 
+                style={{ cursor: 'pointer' }}
+                onClick={() => onAction(symbol, 'monitor')}
+                title="查看监控详情"
+              >
                 监听 {(() => {
                   const estimates = symbolEstimates[symbol];
                   if (Array.isArray(estimates)) {
@@ -143,18 +154,20 @@ const TradingPairCard = ({
           {hasValidPrice && (
             <>
               <button
-                className={`control-btn ${hasPosition(symbol, 'long') ? 'secondary-btn' : 'success-btn'} trading-control-btn`}
-                disabled={hasPosition(symbol, 'long')}
+                className={`control-btn ${(hasPosition(symbol, 'long') || hasOpenEstimate(symbol, 'long')) ? 'secondary-btn' : 'success-btn'} trading-control-btn`}
+                disabled={hasPosition(symbol, 'long') || hasOpenEstimate(symbol, 'long')}
                 onClick={() => onAction(symbol, 'long')}
               >
-                {hasPosition(symbol, 'long') ? '已开多' : '开多'}
+                {hasPosition(symbol, 'long') ? '已开多' : 
+                 hasOpenEstimate(symbol, 'long') ? '监听中' : '开多'}
               </button>
               <button
-                className={`control-btn ${hasPosition(symbol, 'short') ? 'secondary-btn' : 'danger-btn'} trading-control-btn`}
-                disabled={hasPosition(symbol, 'short')}
+                className={`control-btn ${(hasPosition(symbol, 'short') || hasOpenEstimate(symbol, 'short')) ? 'secondary-btn' : 'danger-btn'} trading-control-btn`}
+                disabled={hasPosition(symbol, 'short') || hasOpenEstimate(symbol, 'short')}
                 onClick={() => onAction(symbol, 'short')}
               >
-                {hasPosition(symbol, 'short') ? '已开空' : '开空'}
+                {hasPosition(symbol, 'short') ? '已开空' : 
+                 hasOpenEstimate(symbol, 'short') ? '监听中' : '开空'}
               </button>
             </>
           )}

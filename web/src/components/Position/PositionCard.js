@@ -74,7 +74,12 @@ const PositionCard = ({ position, currentPrice, onAction, onViewDetails }) => {
       {/* 头部信息条 */}
       <div className="position-header-clean">
         <div className="position-info-row">
-          <span className="position-symbol-clean">{position.symbol || 'N/A'}</span>
+          <span className="position-symbol-clean">
+            {(() => {
+              const symbol = position.symbol || 'N/A';
+              return symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol;
+            })()}
+          </span>
           <div className="position-badges">
             <span className={`side-badge ${(position.side || 'long').toLowerCase()}`}>
               {position.side?.toLowerCase() === 'long' ? 'L' : 'S'}
@@ -138,17 +143,27 @@ const PositionCard = ({ position, currentPrice, onAction, onViewDetails }) => {
             止损
           </button>
         </div>
-        <button 
-          className="control-btn secondary-btn"
-          onClick={() => onViewDetails(position)}
-        >
-          查看详情
-          {position.monitorCount > 0 && (
-            <span className="monitor-count-badge">
-              {position.monitorCount}
-            </span>
-          )}
-        </button>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <button 
+            className="control-btn success-btn"
+            onClick={() => onViewDetails(position)}
+            style={{ flex: 1 }}
+          >
+            查看详情
+            {position.monitorCount > 0 && (
+              <span className="monitor-count-badge">
+                {position.monitorCount}
+              </span>
+            )}
+          </button>
+          <button
+            className="control-btn primary-btn"
+            onClick={() => onAction(position, 'kline')}
+            style={{ flex: 1 }}
+          >
+            K线
+          </button>
+        </div>
       </div>
     </div>
   );

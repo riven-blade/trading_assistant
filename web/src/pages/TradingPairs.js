@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Drawer, 
   Input, 
@@ -18,12 +18,13 @@ import {
   PlusOutlined, 
   ReloadOutlined
 } from '@ant-design/icons';
-import api from '../services/api';
+import api, { toggleEstimateEnabled } from '../services/api';
 
 // 通用组件和Hooks
 import PageHeader from '../components/Common/PageHeader';
 import TradeDrawer from '../components/Trading/TradeDrawer';
 import TradingPairCard from '../components/Trading/TradingPairCard';
+import MonitoringCard from '../components/Monitoring/MonitoringCard';
 import useAccountData from '../hooks/useAccountData';
 import useEstimates from '../hooks/useEstimates';
 import usePriceData from '../hooks/usePriceData';
@@ -71,16 +72,25 @@ const TradingPairs = () => {
   const [quantity, setQuantity] = useState(0.001);
   const [marginMode, setMarginMode] = useState(DEFAULT_CONFIG.marginMode); // 默认全仓模式
 
+  // 监控抽屉相关状态
+  const [monitorDrawerVisible, setMonitorDrawerVisible] = useState(false);
+  const [selectedMonitorSymbol, setSelectedMonitorSymbol] = useState('');
+  const [symbolEstimatesData, setSymbolEstimatesData] = useState([]);
+  const [estimatesLoading, setEstimatesLoading] = useState(false);
+
   // 使用自定义Hooks
   const { 
     accountValue, 
     hasPosition, 
-    hasAnyPosition
+    hasAnyPosition,
+    positions
   } = useAccountData();
 
   const { 
     symbolEstimates, 
-    hasAnyEstimate
+    hasAnyEstimate,
+    deleteEstimate,
+    getEstimatesBySymbol
   } = useEstimates();
 
   // 使用全局价格数据管理
@@ -201,12 +211,12 @@ const TradingPairs = () => {
         symbol,
         is_selected: true
       });
-      message.success(`${symbol} 添加成功`);
+      message.success(`${symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol} 添加成功`);
       await fetchSelectedPairs();
       // 价格数据会自动更新，无需手动刷新
       setDrawerVisible(false);
     } catch (error) {
-      message.error(`${symbol} 添加失败`);
+      message.error(`${symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol} 添加失败`);
     }
   };
 
@@ -214,7 +224,7 @@ const TradingPairs = () => {
   const removePair = async (symbol) => {
     if (!canDeleteSymbol(symbol)) {
       const reason = getDeleteDisabledReason(symbol);
-      message.error(`${symbol} ${reason}`);
+      message.error(`${symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol} ${reason}`);
       return;
     }
 
@@ -223,10 +233,10 @@ const TradingPairs = () => {
         symbol,
         is_selected: false
       });
-      message.success(`${symbol} 删除成功`);
+      message.success(`${symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol} 删除成功`);
       fetchSelectedPairs();
     } catch (error) {
-      message.error(`${symbol} 删除失败`);
+      message.error(`${symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol} 删除失败`);
     }
   };
 
@@ -257,11 +267,27 @@ const TradingPairs = () => {
     return selectedPairs.some(pair => pair.symbol === symbol);
   };
 
+  // 检查是否存在同方向的开仓监听
+  const hasOpenEstimate = (symbol, side) => {
+    const estimates = getEstimatesBySymbol(symbol, 'listening');
+    return estimates.some(estimate => 
+      estimate.action_type === 'open' && estimate.side === side
+    );
+  };
+
   // 打开交易模态框
   const openTradeModal = (symbol, side) => {
+    // 检查是否已有同方向仓位
     if (hasPosition(symbol, side)) {
       const positionText = side === 'long' ? '多头' : '空头';
-      message.warning(`${symbol} 已有${positionText}仓位 | 无法重复开仓`);
+      message.warning(`${symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol} 已有${positionText}仓位 | 无法重复开仓`);
+      return;
+    }
+
+    // 检查是否已有同方向开仓监听
+    if (hasOpenEstimate(symbol, side)) {
+      const positionText = side === 'long' ? '多头' : '空头';
+      message.warning(`${symbol && symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol} 已有${positionText}开仓监听 | 无法重复开仓`);
       return;
     }
 
@@ -319,6 +345,9 @@ const TradingPairs = () => {
         // 在新窗口打开K线页面
         const klineUrl = `${window.location.origin}/klines?symbol=${symbol}&interval=1d`;
         window.open(klineUrl, '_blank', 'noopener,noreferrer');
+        break;
+      case 'monitor':
+        openMonitorDrawer(symbol);
         break;
       default:
         break;
@@ -390,6 +419,89 @@ const TradingPairs = () => {
     }
   };
 
+  // 监控相关功能
+  const openMonitorDrawer = (symbol) => {
+    setSelectedMonitorSymbol(symbol);
+    setMonitorDrawerVisible(true);
+    fetchSymbolEstimates(symbol);
+  };
+
+  const closeMonitorDrawer = () => {
+    setMonitorDrawerVisible(false);
+    setSelectedMonitorSymbol('');
+    setSymbolEstimatesData([]);
+  };
+
+  const fetchSymbolEstimates = useCallback((symbol) => {
+    setEstimatesLoading(true);
+    try {
+      // 从全局estimates数据中过滤出该币种相关的监听
+      const filteredEstimates = getEstimatesBySymbol(symbol, 'listening');
+      
+      // 获取当前价格并计算差异
+      const currentPrice = getPriceBySymbol(symbol)?.markPrice || 0;
+      
+      const estimatesWithPrice = filteredEstimates.map(estimate => {
+        const priceDiff = currentPrice > 0 ? 
+          ((estimate.target_price - currentPrice) / currentPrice * 100) : 0;
+        
+        return {
+          ...estimate,
+          current_price: currentPrice,
+          price_difference: priceDiff,
+          is_close_to_trigger: Math.abs(priceDiff) <= 2
+        };
+      });
+      
+      setSymbolEstimatesData(estimatesWithPrice);
+    } catch (error) {
+      console.error('获取币种监控数据失败:', error);
+      setSymbolEstimatesData([]);
+    } finally {
+      setEstimatesLoading(false);
+    }
+  }, [getEstimatesBySymbol, getPriceBySymbol]);
+
+  // 获取币种对应的仓位信息
+  const getPositionForSymbol = useCallback((symbol, side) => {
+    if (!positions || positions.length === 0) {
+      return null;
+    }
+    
+    return positions.find(position => 
+      position.symbol === symbol && position.side === side.toUpperCase()
+    ) || null;
+  }, [positions]);
+
+  // 监听estimates数据变化，实时更新监控抽屉中的数据
+  useEffect(() => {
+    if (selectedMonitorSymbol && monitorDrawerVisible) {
+      fetchSymbolEstimates(selectedMonitorSymbol);
+    }
+  }, [symbolEstimates, selectedMonitorSymbol, monitorDrawerVisible, fetchSymbolEstimates]);
+
+  const handleDeleteEstimate = async (estimateId) => {
+    await deleteEstimate(estimateId);
+    // 重新获取当前币种的监控数据
+    if (selectedMonitorSymbol) {
+      fetchSymbolEstimates(selectedMonitorSymbol);
+    }
+  };
+
+  const handleToggleEstimate = async (estimateId, enabled) => {
+    try {
+      await toggleEstimateEnabled(estimateId, enabled);
+      message.success(`监听已${enabled ? '开启' : '关闭'}`);
+      
+      // 重新获取当前币种的监控数据
+      if (selectedMonitorSymbol) {
+        fetchSymbolEstimates(selectedMonitorSymbol);
+      }
+    } catch (error) {
+      message.error('切换监听状态失败');
+    }
+  };
+
   // 页面操作配置
   const headerActions = [
     <button 
@@ -457,6 +569,7 @@ const TradingPairs = () => {
                 hasPosition={hasPosition}
                 hasAnyPosition={hasAnyPosition}
                 hasAnyEstimate={hasAnyEstimate}
+                hasOpenEstimate={hasOpenEstimate}
                 symbolEstimates={symbolEstimates}
                 canDeleteSymbol={canDeleteSymbol}
                 getDeleteDisabledReason={getDeleteDisabledReason}
@@ -613,7 +726,7 @@ const TradingPairs = () => {
                       fontSize: isMobile ? '12px' : '14px',
                       lineHeight: 1.2
                     }}>
-                      {text}
+                      {text && text.length > 8 ? text.substring(0, 8) + '...' : text}
                     </div>
                     <div style={{ 
                       fontSize: isMobile ? '10px' : '12px', 
@@ -741,6 +854,68 @@ const TradingPairs = () => {
         marginMode={marginMode}
         onMarginModeChange={setMarginMode}
       />
+
+      {/* 监控抽屉 */}
+      <Drawer
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: '16px', fontWeight: 600, color: '#1f2937' }}>
+              {selectedMonitorSymbol}
+            </span>
+            <span style={{ 
+              background: '#f9fafb',
+              color: '#6b7280',
+              padding: '2px 6px',
+              borderRadius: '4px',
+              fontSize: '10px',
+              fontWeight: 500
+            }}>
+              {symbolEstimatesData.length}个监听
+            </span>
+          </div>
+        }
+        placement="right"
+        onClose={closeMonitorDrawer}
+        open={monitorDrawerVisible}
+        width={isMobile ? '100%' : 500}
+        styles={{
+          body: {
+            paddingTop: 0,
+            height: '100%'
+          }
+        }}
+      >
+        <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+          <div className="monitoring-list-container" style={{ paddingTop: '16px' }}>
+            {estimatesLoading ? (
+              <Spin style={{ display: 'block', textAlign: 'center', margin: '20px 0' }} />
+            ) : symbolEstimatesData.length === 0 ? (
+              <Empty 
+                description="暂无价格监听" 
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                style={{ margin: '20px 0' }}
+              />
+            ) : (
+              <div className="monitoring-list-content">
+                {symbolEstimatesData.map((estimate) => {
+                  // 获取对应的仓位信息
+                  const currentPosition = getPositionForSymbol(estimate.symbol, estimate.side);
+                  
+                  return (
+                    <MonitoringCard
+                      key={estimate.id}
+                      estimate={estimate}
+                      currentPosition={currentPosition}
+                      onDelete={handleDeleteEstimate}
+                      onToggle={handleToggleEstimate}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </Drawer>
 
     </div>
   );

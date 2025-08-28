@@ -1,6 +1,6 @@
 import React from 'react';
 import { Switch } from 'antd';
-import { ACTION_TYPE_TEXT } from '../../utils/constants';
+import { getDetailedActionText } from '../../utils/constants';
 
 /**
  * 监听卡片组件
@@ -10,10 +10,19 @@ import { ACTION_TYPE_TEXT } from '../../utils/constants';
  * @param {Function} onToggle - 监听开关回调
  */
 const MonitoringCard = ({ estimate, currentPosition, onDelete, onToggle }) => {
-  const actionText = ACTION_TYPE_TEXT[estimate.action_type] || estimate.action_type;
+  // 使用详细的操作类型文本
+  const actionText = getDetailedActionText(estimate.action_type, estimate.side);
 
+  // 判断是否为基于仓位的操作
+  const isPositionBasedAction = ['take_profit', 'stop_loss', 'close'].includes(estimate.action_type);
+  
   // 计算预估盈利/止损
   const calculateEstimatedPnL = () => {
+    // 开仓操作不计算基于仓位的盈亏
+    if (!isPositionBasedAction) {
+      return 0;
+    }
+    
     if (!currentPosition || !estimate.quantity || !estimate.target_price || !currentPosition.entry_price) {
       return 0;
     }
@@ -26,8 +35,58 @@ const MonitoringCard = ({ estimate, currentPosition, onDelete, onToggle }) => {
     return priceDiff * estimate.quantity;
   };
 
+  // 计算仓位占比
+  const calculatePositionRatio = () => {
+    // 开仓操作不计算仓位占比
+    if (!isPositionBasedAction) {
+      return null;
+    }
+    
+    if (!currentPosition || !currentPosition.size || currentPosition.size === 0) {
+      return null;
+    }
+    
+    return ((estimate.quantity / Math.abs(currentPosition.size)) * 100).toFixed(1);
+  };
+
   const estimatedPnL = calculateEstimatedPnL();
   const isProfit = estimatedPnL >= 0;
+  const positionRatio = calculatePositionRatio();
+
+  // 计算交易金额
+  const calculateTradeAmount = () => {
+    if (!estimate.quantity) return 0;
+    
+    let basePrice = 0;
+    
+    // 对于基于仓位的操作，使用开仓价格
+    if (isPositionBasedAction && currentPosition && currentPosition.entry_price) {
+      basePrice = currentPosition.entry_price;
+    } 
+    // 对于开仓操作，使用目标价格
+    else if (estimate.target_price) {
+      basePrice = estimate.target_price;
+    }
+    
+    if (!basePrice) return 0;
+    
+    // 计算保证金金额：价格 × 数量 ÷ 杠杆
+    if (estimate.leverage && estimate.leverage > 0) {
+      return (estimate.quantity * basePrice) / estimate.leverage;
+    }
+    
+    // 如果没有杠杆信息，返回名义金额
+    return estimate.quantity * basePrice;
+  };
+
+  const tradeAmount = calculateTradeAmount();
+
+  // 获取币种基础名称
+  const getBaseAsset = (symbol) => {
+    if (!symbol) return '';
+    const baseAsset = symbol.replace('USDT', '');
+    return baseAsset.length > 8 ? baseAsset.substring(0, 8) + '...' : baseAsset;
+  };
 
   // 格式化数字显示
   return (
@@ -35,7 +94,7 @@ const MonitoringCard = ({ estimate, currentPosition, onDelete, onToggle }) => {
       {/* 头部信息 */}
       <div className="monitoring-header-clean">
         <div className="monitoring-info-row">
-          <span className={`monitoring-action-tag ${estimate.action_type}`}>
+          <span className={`monitoring-action-tag ${estimate.action_type} ${estimate.side}`}>
             {actionText}
           </span>
           <span className="monitoring-order-type">{estimate.order_type}</span>
@@ -102,26 +161,38 @@ const MonitoringCard = ({ estimate, currentPosition, onDelete, onToggle }) => {
       <div className="monitoring-details">
         <div className="detail-row">
           <span className="detail-label">交易数量</span>
-          <span className="detail-value">{estimate.quantity?.toFixed(6)} {estimate.symbol?.replace('USDT', '') || ''}</span>
-        </div>
-        <div className="detail-row">
-          <span className="detail-label">仓位占比</span>
           <span className="detail-value">
-            {currentPosition && currentPosition.size > 0 
-              ? `${((estimate.quantity / Math.abs(currentPosition.size)) * 100).toFixed(1)}%`
-              : 'N/A'
-            }
+            {estimate.quantity?.toFixed(6)} {getBaseAsset(estimate.symbol)}
           </span>
         </div>
         <div className="detail-row">
-          <span className="detail-label">预估盈亏</span>
-          <span className={`detail-value ${isProfit ? 'profit' : 'loss'}`}>
-            {estimatedPnL !== 0 
-              ? `${isProfit ? '+' : ''}${estimatedPnL.toFixed(2)} USDT`
-              : 'N/A'
-            }
+          <span className="detail-label">交易金额</span>
+          <span className="detail-value">
+            {tradeAmount > 0 ? `${tradeAmount.toFixed(2)} USDT` : 'N/A'}
           </span>
         </div>
+        {/* 仓位占比 - 只对基于仓位的操作显示 */}
+        {isPositionBasedAction && (
+          <div className="detail-row">
+            <span className="detail-label">仓位占比</span>
+            <span className="detail-value">
+              {positionRatio ? `${positionRatio}%` : 'N/A'}
+            </span>
+          </div>
+        )}
+        
+        {/* 预估盈亏 - 只对基于仓位的操作显示 */}
+        {isPositionBasedAction && (
+          <div className="detail-row">
+            <span className="detail-label">预估盈亏</span>
+            <span className={`detail-value ${isProfit ? 'profit' : 'loss'}`}>
+              {estimatedPnL !== 0 
+                ? `${isProfit ? '+' : ''}${estimatedPnL.toFixed(2)} USDT`
+                : 'N/A'
+              }
+            </span>
+          </div>
+        )}
         <div className="detail-row">
           <span className="detail-label">创建时间</span>
           <span className="detail-value time">

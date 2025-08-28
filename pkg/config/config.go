@@ -31,6 +31,9 @@ type Config struct {
 	// 交易配置
 	PositionMode string // both: 双向持仓, single: 单向持仓
 
+	// 风险管理配置
+	BalanceRatioThreshold float64 // 余额比例阈值，低于此比例不开仓
+
 	// 认证配置
 	AdminUsername string // 管理员用户名
 	AdminPassword string // 管理员密码
@@ -62,6 +65,8 @@ func LoadConfig() {
 		BaseURL:  getEnv("BASE_URL", "localhost"),
 
 		PositionMode: getEnv("POSITION_MODE", "both"),
+
+		BalanceRatioThreshold: getEnvFloat("BALANCE_RATIO_THRESHOLD", 20.0),
 
 		AdminUsername: getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
@@ -98,6 +103,15 @@ func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
 		if boolValue, err := strconv.ParseBool(value); err == nil {
 			return boolValue
+		}
+	}
+	return defaultValue
+}
+
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		if floatValue, err := strconv.ParseFloat(value, 64); err == nil {
+			return floatValue
 		}
 	}
 	return defaultValue
