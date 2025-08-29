@@ -1,8 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { 
   message, 
-  Spin, 
-  Empty
+  Spin
 } from 'antd';
 import { useLocation, useSearchParams } from 'react-router-dom';
 import { init, dispose, registerOverlay } from 'klinecharts';
@@ -151,14 +150,45 @@ const ChartPage = () => {
   }, [selectedCoin, searchParams, setSearchParams]);
 
   // 同步更新周期状态和URL
-  const handleIntervalChange = useCallback((newInterval) => {
+  const handleIntervalChange = useCallback(async (newInterval) => {
     if (newInterval !== selectedInterval) {
       setSelectedInterval(newInterval);
       const newParams = new URLSearchParams(searchParams);
       newParams.set('interval', newInterval);
       setSearchParams(newParams, { replace: true });
+      
+      // 立即加载新周期的K线数据，避免异步状态更新导致的延迟
+      if (selectedCoin && newInterval) {
+        setLoading(true);
+        try {
+          const response = await api.get('/klines', {
+            params: {
+              symbol: selectedCoin,
+              interval: newInterval, // 直接使用新的interval值
+              limit: 1000
+            }
+          });
+          
+          const data = response.data.data || [];
+          
+          if (!isMountedRef.current) return;
+          
+          setKlineData(data);
+          
+          if (data.length === 0) {
+            message.warning('暂无K线数据');
+          }
+        } catch (error) {
+          console.error('加载K线数据失败:', error);
+          if (isMountedRef.current) {
+            message.error(`加载K线数据失败: ${error.response?.data?.error || error.message}`);
+            setKlineData([]);
+          }
+        }
+        setLoading(false);
+      }
     }
-  }, [selectedInterval, searchParams, setSearchParams]);
+  }, [selectedInterval, searchParams, setSearchParams, selectedCoin]);
   
   // 解析URL参数的回调函数
   const getUrlParams = useCallback(() => {
@@ -168,8 +198,8 @@ const ChartPage = () => {
   const [loading, setLoading] = useState(false);
   const [klineData, setKlineData] = useState([]);
   
-  // 指标相关状态 - 默认选中成交量指标
-  const [selectedIndicators, setSelectedIndicators] = useState(['VOL']);
+  // 指标相关状态 - 默认选中成交量和布林带指标
+  const [selectedIndicators, setSelectedIndicators] = useState(['VOL', 'BOLL']);
   
   // UI状态管理
   const [indicatorPanelVisible, setIndicatorPanelVisible] = useState(false);
@@ -227,60 +257,14 @@ const ChartPage = () => {
     return () => window.removeEventListener('resize', handleResize);
   }, [chartInitialized]);
 
-  // 获取选中的币种列表
+  // 获取币种列表
   const fetchSelectedCoins = useCallback(async () => {
     try {
       const response = await api.get('/coins/selected');
       const coinData = response.data.data || [];
-      
-      // 检查组件是否已卸载
-      if (!isMountedRef.current) return;
-      
-      if (coinData.length === 0) {
-        // 如果没有币种数据，先尝试同步
-        try {
-          await api.post('/coins/sync');
-          const retryResponse = await api.get('/coins/selected');
-          const retryCoinData = retryResponse.data.data || [];
-          if (retryCoinData.length > 0) {
-            setCoins(retryCoinData);
-            return;
-          }
-        } catch (syncError) {
-          console.error('同步币种失败:', syncError);
-        }
-        
-        // 同步失败，使用默认币种并选择它们
-        const defaultCoins = [
-          { symbol: 'BTCUSDT', isSelected: true },
-          { symbol: 'ETHUSDT', isSelected: true },
-          { symbol: 'ADAUSDT', isSelected: true }
-        ];
-        setCoins(defaultCoins);
-        
-        // 尝试将默认币种标记为已选择
-        for (const coin of defaultCoins) {
-          try {
-            await api.post('/coins/select', {
-              symbol: coin.symbol,
-              is_selected: true
-            });
-          } catch (selectError) {
-            console.error(`选择币种失败 ${coin.symbol}:`, selectError);
-          }
-        }
-      } else {
-        setCoins(coinData);
-      }
+      setCoins(coinData);
     } catch (error) {
-      console.error('获取币种列表失败:', error);
-      // 如果API完全失败，设置默认币种
-      const defaultCoins = [
-        { symbol: 'BTCUSDT', isSelected: true },
-        { symbol: 'ETHUSDT', isSelected: true },
-        { symbol: 'ADAUSDT', isSelected: true }
-      ];
-      setCoins(defaultCoins);
+      setCoins([]);
     }
   }, []);
 
@@ -303,7 +287,6 @@ const ChartPage = () => {
       
       setCurrentSymbolPositions(symbolPositions);
     } catch (error) {
-      console.error('获取当前币种仓位数据失败:', error);
       setCurrentSymbolPositions([]);
     }
   }, [selectedCoin, positions]);
@@ -330,7 +313,6 @@ const ChartPage = () => {
       
       setCurrentSymbolEstimates(validEstimates);
     } catch (error) {
-      console.error('获取价格监听数据失败:', error);
       setCurrentSymbolEstimates([]);
     }
   }, [selectedCoin, symbolEstimates]);
@@ -375,7 +357,6 @@ const ChartPage = () => {
         message.success('刷新成功');
       }
     } catch (error) {
-      console.error('刷新K线数据失败:', error);
       if (isMountedRef.current) {
         message.error(`刷新K线数据失败: ${error.response?.data?.error || error.message}`);
       }
@@ -450,7 +431,8 @@ const ChartPage = () => {
           'stop_loss': '止损',
           'open': '开仓',
           'close': '平仓',
-          'add': '加仓'
+          'add': '加仓',
+          'addition': '加仓'
         };
         actionText = actionMap[action_type] || action_type;
       }
@@ -542,9 +524,9 @@ const ChartPage = () => {
         } else {
           positionLineIds.current.add(lineId);
         }
-      } catch (error) {
-        console.error(`绘制${type === 'price' ? '价格线' : '仓位线'}失败:`, lineId, error);
-      }
+              } catch (error) {
+          // 绘制失败，忽略错误
+        }
     });
   }, [currentSymbolEstimates, currentSymbolPositions]);
 
@@ -691,14 +673,13 @@ const ChartPage = () => {
           try {
             chartInstanceRef.current.createIndicator('VOL', false);
           } catch (error) {
-            console.error('创建成交量指标失败:', error);
+            // 创建成交量指标失败，忽略错误
           }
           
 
 
           setChartInitialized(true);
         } catch (error) {
-          console.error('图表初始化失败:', error);
           message.error('图表初始化失败');
         }
       }
@@ -715,7 +696,7 @@ const ChartPage = () => {
           chartInstanceRef.current = null;
           setChartInitialized(false);
         } catch (error) {
-          console.error('图表销毁失败:', error);
+          // 图表销毁失败，忽略错误
         }
       }
     };
@@ -733,7 +714,7 @@ const ChartPage = () => {
     try {
       chartInstanceRef.current.removeIndicator();
     } catch (error) {
-      console.error('清除指标失败:', error);
+      // 清除指标失败，忽略错误
     }
   }, []);
 
@@ -765,7 +746,6 @@ const ChartPage = () => {
           );
         }
       } catch (error) {
-        console.error(`添加指标 ${indicatorKey} 失败:`, error);
         message.error(`添加指标失败: ${error.message}`);
       }
     });
@@ -797,13 +777,13 @@ const ChartPage = () => {
                   try {
                     chartInstanceRef.current.createIndicator('VOL', false);
                   } catch (volError) {
-                    console.error('创建成交量指标失败:', volError);
+                    // 创建成交量指标失败，忽略错误
                   }
 
                   setChartInitialized(true);
                 }
               } catch (error) {
-                console.error('主动初始化图表失败:', error);
+                // 主动初始化图表失败，忽略错误
               }
           }
         }, 100);
@@ -888,18 +868,15 @@ const ChartPage = () => {
   // 简化的面板高度设置 - 在固定容器内分配比例
   const adjustPaneHeights = () => {
     if (!chartInstanceRef.current) {
-      console.log('图表实例不存在');
       return;
     }
     
     try {
       const isMobileDevice = window.innerWidth < 768;
       
-      // 固定比例分配 - 简单有效
+      // 固定比例分配 
       const candleHeight = isMobileDevice ? 0.65 : 0.7;   // 主图65-70%
       const volumeHeight = isMobileDevice ? 0.35 : 0.3;   // 成交量30-35%
-      
-      console.log(`📊 面板比例分配: 主图=${candleHeight}, 成交量=${volumeHeight}`);
       
       // 直接设置比例，不设置minHeight避免冲突
       chartInstanceRef.current.setPaneOptions('candle_pane', { 
@@ -912,7 +889,6 @@ const ChartPage = () => {
           chartInstanceRef.current.setPaneOptions('volume_pane', { 
             height: volumeHeight
           });
-          console.log('✅ 成交量面板比例设置完成');
         } catch (e) {
           console.error('❌ 设置成交量面板失败:', e);
         }
@@ -999,64 +975,58 @@ const ChartPage = () => {
 
 
 
-  // 加载K线数据
+  // 初始加载K线数据
+  const initialLoadRef = useRef({ coin: null, interval: null });
   useEffect(() => {
     if (coins.length > 0 && selectedCoin && selectedInterval) {
-      const loadData = async () => {
-        if (!selectedCoin || !selectedInterval) {
-          return;
-        }
-        
-        setLoading(true);
-        try {
-          const response = await api.get('/klines', {
-            params: {
-              symbol: selectedCoin,
-              interval: selectedInterval,
-              limit: 1000
+      // 检查是否是初始加载或者币种变化，而不是周期变化
+      const isInitialLoad = !initialLoadRef.current.coin;
+      const isCoinChange = initialLoadRef.current.coin !== selectedCoin;
+      
+      // 只在初始加载或币种变化时加载数据，周期变化已在handleIntervalChange中处理
+      if (isInitialLoad || isCoinChange) {
+        const loadData = async () => {
+          if (!selectedCoin || !selectedInterval) {
+            return;
+          }
+          
+          setLoading(true);
+          try {
+            const response = await api.get('/klines', {
+              params: {
+                symbol: selectedCoin,
+                interval: selectedInterval,
+                limit: 1000
+              }
+            });
+            
+            const data = response.data.data || [];
+            
+            // 检查组件是否已卸载
+            if (!isMountedRef.current) return;
+            
+            setKlineData(data);
+            
+            if (data.length === 0) {
+              message.warning('暂无K线数据');
             }
-          });
-          
-          const data = response.data.data || [];
-          
-          // 检查组件是否已卸载
-          if (!isMountedRef.current) return;
-          
-          setKlineData(data);
-          
-          if (data.length === 0) {
-            message.warning('暂无K线数据');
+          } catch (error) {
+            console.error('加载K线数据失败:', error);
+            if (isMountedRef.current) {
+              message.error(`加载K线数据失败: ${error.response?.data?.error || error.message}`);
+              setKlineData([]); // 清空数据
+            }
           }
-        } catch (error) {
-          console.error('加载K线数据失败:', error);
-          if (isMountedRef.current) {
-            message.error(`加载K线数据失败: ${error.response?.data?.error || error.message}`);
-            setKlineData([]); // 清空数据
-          }
-        }
-        setLoading(false);
-      };
+          setLoading(false);
+        };
 
-      loadData();
+        loadData();
+      }
+      
+      // 更新跟踪的当前值
+      initialLoadRef.current = { coin: selectedCoin, interval: selectedInterval };
     }
   }, [coins, selectedCoin, selectedInterval]);
-
-  // 如果没有币种数据，显示空状态
-  if (coins.length === 0 && !loading) {
-    return (
-      <div style={{ 
-        background: '#ffffff',
-        height: '100vh',
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center'
-      }}>
-        <Empty 
-          description="暂无可用币种，请先在币种管理页面选择币种"
-        />
-      </div>
-    );
-  }
 
   return (
     <div style={{ 
@@ -1105,7 +1075,7 @@ const ChartPage = () => {
         <div 
           className="kline-chart-container"
           style={{ 
-            height: isMobile ? 'calc(100% - 120px)' : 'calc(100% - 40px)',
+            height: isMobile ? 'calc(100% - 0px)' : 'calc(100% - 40px)',
             position: 'relative', 
             background: '#ffffff',
             overflow: 'hidden',

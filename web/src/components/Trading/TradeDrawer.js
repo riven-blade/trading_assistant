@@ -48,21 +48,32 @@ const TradeDrawer = ({
   const baseAsset = symbol?.replace('USDT', '') || '';
   
   // 计算预估USDT金额
-  const estimatedUsdtAmount = markPrice > 0 && quantity > 0 ? (quantity * markPrice) / selectedLeverage : 0;
+  const getPriceForCalculation = () => {
+    // 限价单使用目标价格，市价单使用当前价格
+    if (orderType === 'limit') {
+      return targetPrice > 0 ? targetPrice : markPrice;
+    }
+    return markPrice;
+  };
+  
+  const priceForCalculation = getPriceForCalculation();
+  const estimatedUsdtAmount = priceForCalculation > 0 && quantity > 0 ? (quantity * priceForCalculation) / selectedLeverage : 0;
   
   // 计算最大数量
   const getMaxQuantity = () => {
     if (!markPrice || !selectedLeverage || !accountValue?.usdt_free) return 1;
     const maxUsdtAmount = accountValue.usdt_free * 0.8; // 使用80%的可用余额
-    const priceToUse = targetPrice > 0 ? targetPrice : markPrice;
+    // 使用与保证金计算相同的价格逻辑
+    const priceToUse = getPriceForCalculation();
+    if (priceToUse <= 0) return 1;
     const maxQuantity = (maxUsdtAmount * selectedLeverage) / priceToUse;
     return parseFloat(maxQuantity.toFixed(6));
   };
   
-  // 获取价格范围 (当前价格的 ±20%)
+  // 获取价格范围 (当前价格的 ±100%)
   const getPriceRange = () => {
     if (!markPrice) return [0, 100];
-    const range = markPrice * 0.5;
+    const range = markPrice * 1.0;
     return [markPrice - range, markPrice + range];
   };
 

@@ -343,7 +343,7 @@ const TradingPairs = () => {
         break;
       case 'kline':
         // 在新窗口打开K线页面
-        const klineUrl = `${window.location.origin}/klines?symbol=${symbol}&interval=1d`;
+        const klineUrl = `${window.location.origin}/klines?symbol=${symbol}&interval=4h`;
         window.open(klineUrl, '_blank', 'noopener,noreferrer');
         break;
       case 'monitor':

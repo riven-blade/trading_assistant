@@ -72,7 +72,8 @@ const ChartToolbar = ({
       'take_profit': { text: '止盈', color: 'blue' },
       'stop_loss': { text: '止损', color: 'red' },
       'open': { text: '开仓', color: 'orange' },
-      'add': { text: '加仓', color: 'orange' }
+      'add': { text: '加仓', color: 'orange' },
+      'addition': { text: '加仓', color: 'orange' }
     };
     
     return actionMap[action_type] || { text: action_type, color: 'orange' };
@@ -121,12 +122,22 @@ const ChartToolbar = ({
           filterOption={(input, option) =>
             (option?.children ?? '').toLowerCase().includes(input.toLowerCase())
           }
+          listHeight={256}
+          virtual={false}
+          getPopupContainer={(trigger) => trigger.parentElement}
         >
-          {coins.map(coin => (
-            <Option key={coin.symbol} value={coin.symbol}>
-              {coin.symbol && coin.symbol.length > 8 ? coin.symbol.substring(0, 8) + '...' : coin.symbol}
-            </Option>
-          ))}
+          {coins
+            .filter((coin, index, self) => 
+              coin && 
+              coin.symbol && 
+              typeof coin.symbol === 'string' &&
+              self.findIndex(c => c.symbol === coin.symbol) === index
+            )
+            .map(coin => (
+              <Option key={coin.symbol} value={coin.symbol}>
+                {coin.symbol.length > 8 ? coin.symbol.substring(0, 8) + '...' : coin.symbol}
+              </Option>
+            ))}
         </Select>
 
         {/* 价格监听标识 */}

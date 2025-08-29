@@ -104,10 +104,6 @@ func (mm *MarketManager) SyncMarketAndPriceData() error {
 func (mm *MarketManager) syncMarketData() error {
 	logrus.Info("开始同步市场数据...")
 
-	if err := mm.clearOldCoinData(); err != nil {
-		logrus.Warnf("清理历史币种数据失败: %v", err)
-	}
-
 	// 获取所有USDT期货交易对
 	markets, err := mm.binanceClient.FetchMarkets(context.Background(), nil)
 	if err != nil {
@@ -121,8 +117,10 @@ func (mm *MarketManager) syncMarketData() error {
 
 	for i := range markets {
 		market := markets[i]
-		// 只处理活跃的USDT期货交易对
-		if !market.Active || market.Quote != "USDT" || !market.Future {
+		// 只处理活跃的USDT永续合约
+		if !market.Active || market.Quote != "USDT" || !market.Swap {
+			logrus.Debugf("跳过非永续合约: %s (Active: %v, Quote: %s, Swap: %v)",
+				market.ID, market.Active, market.Quote, market.Swap)
 			continue
 		}
 
@@ -179,21 +177,6 @@ func (mm *MarketManager) syncMarketData() error {
 	return nil
 }
 
-// clearOldCoinData 清理Redis中的历史币种数据
-func (mm *MarketManager) clearOldCoinData() error {
-	// 获取所有现有的币种
-	existingCoins, err := redis.GlobalRedisClient.GetAllCoins()
-	if err != nil {
-		return err
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"existing_coins": len(existingCoins),
-	}).Info("开始清理历史币种数据")
-
-	return nil
-}
-
 // cleanupInvalidCoins 清理不再有效的币种
 func (mm *MarketManager) cleanupInvalidCoins(validSymbols map[string]bool) error {
 	// 获取所有现有币种
@@ -223,7 +206,7 @@ func (mm *MarketManager) cleanupInvalidCoins(validSymbols map[string]bool) error
 	return nil
 }
 
-// syncPriceData 同步价格数据（内部方法）
+// syncPriceData 同步价格数据
 func (mm *MarketManager) syncPriceData() error {
 	logrus.Info("开始同步价格数据...")
 

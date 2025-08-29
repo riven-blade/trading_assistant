@@ -57,26 +57,39 @@ const TradingPairCard = ({
             {symbol.length > 8 ? symbol.substring(0, 8) + '...' : symbol}
           </span>
           <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginLeft: 'auto' }}>
-            {hasAnyEstimate(symbol) && (
-              <Tag 
-                size="small" 
-                color="blue" 
-                className="estimate-badge" 
-                style={{ cursor: 'pointer' }}
-                onClick={() => onAction(symbol, 'monitor')}
-                title="查看监控详情"
-              >
-                监听 {(() => {
-                  const estimates = symbolEstimates[symbol];
-                  if (Array.isArray(estimates)) {
-                    return estimates.length;
-                  } else if (typeof estimates === 'number') {
-                    return estimates;
-                  }
-                  return '';
-                })()}
-              </Tag>
-            )}
+            {hasAnyEstimate(symbol) && (() => {
+              const estimates = symbolEstimates[symbol];
+              let displayText = '';
+              let titleText = "查看监控详情";
+              let tagColor = "blue";
+              
+              if (Array.isArray(estimates)) {
+                const enabledCount = estimates.filter(estimate => estimate.enabled).length;
+                const totalCount = estimates.length;
+                displayText = `${enabledCount}/${totalCount}`;
+                titleText = `启用监听: ${enabledCount}个，总监听: ${totalCount}个，点击查看详情`;
+                
+                // 如果有未启用的监听，显示黄色
+                if (enabledCount < totalCount) {
+                  tagColor = "gold";
+                }
+              } else if (typeof estimates === 'number') {
+                displayText = estimates;
+              }
+              
+              return (
+                <Tag 
+                  size="small" 
+                  color={tagColor} 
+                  className="estimate-badge" 
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onAction(symbol, 'monitor')}
+                  title={titleText}
+                >
+                  监听 {displayText}
+                </Tag>
+              );
+            })()}
             <button
               className="control-btn primary-btn kline-btn-icon"
               onClick={() => onAction(symbol, 'kline')}

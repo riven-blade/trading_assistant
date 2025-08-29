@@ -549,6 +549,15 @@ func (b *Binance) parseMarket(data map[string]interface{}) *types.Market {
 	baseAsset := b.SafeString(data, "baseAsset", "")
 	quoteAsset := b.SafeString(data, "quoteAsset", "")
 
+	// 从API数据中获取合约类型字段
+	contractType := b.SafeString(data, "contractType", "")
+
+	// 根据API提供的contractType字段判断是否为永续合约
+	isSwap := false
+	if b.marketType == types.MarketTypeFuture {
+		isSwap = contractType == "PERPETUAL"
+	}
+
 	market := &types.Market{
 		ID:     symbol,
 		Symbol: fmt.Sprintf("%s/%s", baseAsset, quoteAsset),
@@ -558,7 +567,7 @@ func (b *Binance) parseMarket(data map[string]interface{}) *types.Market {
 		Active: status == "TRADING",
 		Spot:   b.marketType == types.MarketTypeSpot,
 		Future: b.marketType == types.MarketTypeFuture,
-		Swap:   b.marketType == types.MarketTypeFuture,
+		Swap:   isSwap, // 根据API的contractType字段正确设置
 		Info:   data,
 	}
 
@@ -1440,10 +1449,10 @@ func (b *Binance) FuturesNewOrder(params map[string]interface{}) (*FuturesOrderR
 			Msg  string `json:"msg"`
 		}
 		if err := json.Unmarshal(response.Body, &errorResp); err == nil {
-			return nil, fmt.Errorf("Binance下单失败 [%d]: %s (HTTP %d)",
+			return nil, fmt.Errorf("binance下单失败 [%d]: %s (HTTP %d)",
 				errorResp.Code, errorResp.Msg, response.StatusCode)
 		}
-		return nil, fmt.Errorf("Binance下单失败: HTTP %d, 响应: %s",
+		return nil, fmt.Errorf("binance下单失败: HTTP %d, 响应: %s",
 			response.StatusCode, string(response.Body))
 	}
 
