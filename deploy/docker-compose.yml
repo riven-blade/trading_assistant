@@ -1,0 +1,75 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: traefik:v3.3.5
+    container_name: trading-traefik
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8180:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ./traefik/dynamic:/etc/traefik/dynamic:ro
+      - traefik_certificates:/certificates
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - trading-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.foreverlin.cn`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.traefik.service=api@internal"
+
+  trading-assistant:
+    image: ddhdocker/trading-assistant:0.0.1
+    container_name: trading-assistant-container
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - trading-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.trading.rule=Host(`trading.foreverlin.cn`)"
+      - "traefik.http.routers.trading.entrypoints=websecure"
+      - "traefik.http.routers.trading.tls.certresolver=letsencrypt"
+      - "traefik.http.services.trading.loadbalancer.server.port=8080"
+      # 中间件配置 - CORS + 安全头 + 压缩
+      - "traefik.http.routers.trading.middlewares=trading-middlewares"
+      - "traefik.http.middlewares.trading-middlewares.chain.middlewares=trading-cors,security-headers,compression"
+      # HTTP 重定向到 HTTPS
+      - "traefik.http.routers.trading-http.rule=Host(`trading.foreverlin.cn`)"
+      - "traefik.http.routers.trading-http.entrypoints=web"
+      - "traefik.http.routers.trading-http.middlewares=trading-redirect"
+      - "traefik.http.middlewares.trading-redirect.redirectscheme.scheme=https"
+
+  # Redis 数据库
+  redis:
+    image: redis:8.0-alpine
+    container_name: trading-redis
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    environment:
+      - TZ=Asia/Shanghai
+    networks:
+      - trading-network
+    labels:
+      - "traefik.enable=false"
+
+networks:
+  trading-network:
+    driver: bridge
+
+volumes:
+  redis_data:
+    driver: local
+  traefik_certificates:
+    driver: local

@@ -1,36 +1,41 @@
-# 二进制文件
-/bin/
-/trading_assistant
+# Binaries for programs and plugins
 *.exe
+*.exe~
 *.dll
 *.so
 *.dylib
 
-# 环境变量文件
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# Build outputs
+bin/
+dist/
+build/
+
+# Environment variables
 .env
 .env.local
 .env.production
+.env.development
 
-# 日志文件
-*.log
-logs/
-
-# 临时文件
-*.tmp
-*.temp
-temp/
-tmp/
-
-# IDE 配置文件
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-deploy/
-
-# 操作系统生成文件
+# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -39,24 +44,81 @@ deploy/
 ehthumbs.db
 Thumbs.db
 
-# Go 相关
-*.test
-*.prof
-coverage.out
+# Logs
+*.log
+logs/
 
-# Node.js (前端构建)
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# nyc test coverage
+.nyc_output
+
+# node_modules
 node_modules/
+
+# npm
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+lerna-debug.log*
 
-# 前端构建产物（如果不需要提交）
-# web/build/
-# web/dist/
+# Optional npm cache directory
+.npm
 
-# Redis dump文件
+# Optional eslint cache
+.eslintcache
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# parcel-bundler cache (https://parceljs.org/)
+.cache
+.parcel-cache
+
+# next.js build output
+.next
+
+# nuxt.js build output
+.nuxt
+
+# vuepress build output
+.vuepress/dist
+
+# Serverless directories
+.serverless/
+
+# FuseBox cache
+.fusebox/
+
+# DynamoDB Local files
+.dynamodb/
+
+# TernJS port file
+.tern-port
+
+# Redis dump file
 dump.rdb
 
-# 备份文件
-*.bak
-*.backup
+# Temporary folders
+tmp/
+temp/
+
+# Application specific
+trading_assistant
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker
+*.pid

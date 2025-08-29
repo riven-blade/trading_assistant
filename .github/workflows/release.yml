@@ -1,0 +1,191 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd web && npm ci
+
+      - name: Build frontend
+        run: cd web && npm run build
+
+      - name: Build binaries
+        run: |
+          # Linux AMD64
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o dist/trading_assistant_linux_amd64 .
+
+          # Linux ARM64
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o dist/trading_assistant_linux_arm64 .
+
+          # macOS Intel
+          CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o dist/trading_assistant_darwin_amd64 .
+
+          # macOS Apple Silicon
+          CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o dist/trading_assistant_darwin_arm64 .
+
+          # Windows
+          CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o dist/trading_assistant_windows_amd64.exe .
+
+      - name: Create archives
+        run: |
+          cd dist
+
+          # Create tar.gz for Unix systems
+          for binary in trading_assistant_linux_* trading_assistant_darwin_*; do
+            if [ -f "$binary" ]; then
+              tar -czf "${binary}.tar.gz" "$binary" -C ../web build
+            fi
+          done
+
+          # Create zip for Windows
+          if [ -f "trading_assistant_windows_amd64.exe" ]; then
+            zip -r "trading_assistant_windows_amd64.zip" "trading_assistant_windows_amd64.exe" -j
+            cd ../web && zip -r "../dist/trading_assistant_windows_amd64.zip" build && cd ../dist
+          fi
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          # Extract version from tag
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+          # Create release notes
+          cat > release_notes.md << 'EOF'
+          ## Trading Assistant ${{ env.VERSION }}
+
+          ### 🚀 主要功能
+
+          - **Binance 期货交易集成**: 完整的API支持，实时交易执行
+          - **智能价格监控**: WebSocket实时监控，自动触发交易策略  
+          - **现代化Web界面**: React + Ant Design响应式界面
+          - **多平台支持**: Linux、macOS、Windows全平台兼容
+          - **Docker部署**: 一键容器化部署
+          - **Telegram通知**: 实时交易通知和系统状态推送
+
+          ### 📦 下载说明
+
+          请根据您的系统选择对应的版本：
+
+          - **Linux (x64)**: `trading_assistant_linux_amd64.tar.gz`
+          - **Linux (ARM64)**: `trading_assistant_linux_arm64.tar.gz`  
+          - **macOS (Intel)**: `trading_assistant_darwin_amd64.tar.gz`
+          - **macOS (Apple Silicon)**: `trading_assistant_darwin_arm64.tar.gz`
+          - **Windows (x64)**: `trading_assistant_windows_amd64.zip`
+
+          ### 🔧 快速开始
+
+          1. 下载对应平台的压缩包
+          2. 解压到目标目录
+          3. 复制 `.env.example` 为 `.env` 并配置
+          4. 运行可执行文件启动服务
+          5. 访问 `http://localhost:8080` 使用Web界面
+
+          详细使用说明请参考 [README.md](https://github.com/${{ github.repository }})
+
+          ### ⚠️ 重要提示
+
+          - 首次使用建议在Binance测试网环境测试
+          - 请妥善保管您的API密钥和配置文件
+          - 加密货币交易存在风险，请谨慎操作
+          EOF
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            dist/trading_assistant_linux_amd64.tar.gz
+            dist/trading_assistant_linux_arm64.tar.gz
+            dist/trading_assistant_darwin_amd64.tar.gz
+            dist/trading_assistant_darwin_arm64.tar.gz
+            dist/trading_assistant_windows_amd64.zip
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Build and Push Docker Image
+    runs-on: ubuntu-latest
+    needs: release
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ secrets.DOCKER_USERNAME }}/trading-assistant
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install frontend dependencies
+        run: cd web && npm ci
+
+      - name: Build frontend
+        run: cd web && npm run build
+
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: "1.21"
+
+      - name: Build backend
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o bin/trading_assistant .
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,102 @@
+# Traefik 主配置文件
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# API 和仪表板配置
+api:
+  dashboard: true
+  debug: false
+  insecure: false
+
+# 入口点配置
+entryPoints:
+  web:
+    address: ":80"
+    # HTTP 重定向到 HTTPS
+    http:
+      redirections:
+        entrypoint:
+          to: websecure
+          scheme: https
+          permanent: true
+
+  websecure:
+    address: ":443"
+    # HTTPS 配置
+    http:
+      tls:
+        options: default
+
+# 证书解析器 - Let's Encrypt 自动签证
+certificatesResolvers:
+  letsencrypt:
+    acme:
+      # Let's Encrypt 服务器
+      # 生产环境使用：https://acme-v02.api.letsencrypt.org/directory
+      # 测试环境使用：https://acme-staging-v02.api.letsencrypt.org/directory
+      caServer: https://acme-v02.api.letsencrypt.org/directory
+      email: ddh2022lin@gmail.com
+      storage: /certificates/acme.json
+      # HTTP 质询
+      httpChallenge:
+        entryPoint: web
+      # DNS 质询（可选，用于通配符证书）
+      # dnsChallenge:
+      #   provider: cloudflare
+      #   resolvers:
+      #     - "1.1.1.1:53"
+      #     - "8.8.8.8:53"
+
+# 服务发现配置
+providers:
+  # Docker 容器自动发现
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    watch: true
+    network: trading-network
+
+  # 文件配置提供者
+  file:
+    directory: /etc/traefik/dynamic
+    watch: true
+
+# 日志配置
+log:
+  level: INFO
+  format: json
+
+# 访问日志
+accessLog:
+  format: json
+  fields:
+    headers:
+      defaultMode: keep
+      names:
+        User-Agent: redact
+        Authorization: drop
+        Content-Type: keep
+
+# 指标配置
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true
+
+# 健康检查
+ping:
+  entryPoint: web
+
+# TLS 配置
+tls:
+  options:
+    default:
+      sslStrategies:
+        - "tls.SniStrict"
+      minVersion: "VersionTLS12"
+      cipherSuites:
+        - "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384"
+        - "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305"
+        - "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+# 中间件配置（在动态配置中定义）

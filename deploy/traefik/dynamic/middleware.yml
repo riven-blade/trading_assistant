@@ -1,0 +1,79 @@
+# Traefik 动态配置 - 中间件
+http:
+  middlewares:
+    # 安全头中间件
+    security-headers:
+      headers:
+        frameDeny: true
+        sslRedirect: true
+        browserXssFilter: true
+        contentTypeNosniff: true
+        forceSTSHeader: true
+        stsIncludeSubdomains: true
+        stsPreload: true
+        stsSeconds: 31536000
+        customRequestHeaders:
+          X-Forwarded-Proto: "https"
+        customResponseHeaders:
+          X-Robots-Tag: "noindex,nofollow,nosnippet,noarchive"
+
+    # API 限流中间件
+    api-ratelimit:
+      rateLimit:
+        burst: 100
+        average: 50
+
+    # 压缩中间件
+    compression:
+      compress: {}
+
+    # CORS 中间件
+    trading-cors:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - OPTIONS
+          - PATCH
+        accessControlAllowHeaders:
+          - "Content-Type"
+          - "Authorization"
+          - "X-Requested-With"
+          - "Accept"
+          - "Origin"
+          - "Cache-Control"
+          - "X-File-Name"
+        accessControlAllowOriginListRegex:
+          - "^https://[a-zA-Z0-9.-]+\\.(yourdomain\\.com)$"
+          - "^https://(trading|www)\\.(yourdomain\\.com)$"
+        accessControlAllowCredentials: true
+        accessControlMaxAge: 86400
+        addVaryHeader: true
+        accessControlExposeHeaders:
+          - "Content-Length"
+          - "Content-Range"
+
+    # 身份验证中间件（可选）
+    basic-auth:
+      basicAuth:
+        users:
+          - "admin:$2y$10$HASHED_PASSWORD" # 请使用 htpasswd 生成
+
+    # IP 白名单中间件（可选）
+    ip-whitelist:
+      ipWhiteList:
+        sourceRange:
+          - "127.0.0.1/32"
+          - "10.0.0.0/8"
+          - "172.16.0.0/12"
+          - "192.168.0.0/16"
+
+# TLS 配置
+tls:
+  stores:
+    default:
+      defaultCertificate:
+        certFile: /certificates/default.crt
+        keyFile: /certificates/default.key
