@@ -112,7 +112,8 @@ run_tests() {
     # 前端测试（如果存在）
     if [ -f "web/package.json" ]; then
         cd web
-        if ! npm test -- --coverage --watchAll=false; then
+        # 使用 --passWithNoTests 选项，在没有测试文件时也能通过
+        if ! npm test -- --coverage --watchAll=false --passWithNoTests; then
             print_error "前端测试失败"
             exit 1
         fi
