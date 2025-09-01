@@ -30,7 +30,8 @@ type Binance struct {
 	endpoints map[string]string
 
 	// WebSocket连接池
-	wsClient *WebSocket
+	wsClient       *WebSocket
+	userDataStream *UserDataStream // 独立的用户数据流管理器
 
 	// 缓存字段
 	lastServerTimeRequest int64
@@ -69,6 +70,9 @@ func New(config *Config) (*Binance, error) {
 	if config.EnableWebSocket {
 		wsConfig := DefaultWebSocketConfig()
 		binance.wsClient = NewWebSocket(binance, wsConfig)
+
+		// 初始化独立的用户数据流管理器
+		binance.userDataStream = NewUserDataStream(binance)
 	}
 
 	return binance, nil
@@ -1292,7 +1296,7 @@ func (b *Binance) CreateListenKey() (string, error) {
 	}
 
 	if listenKey, ok := result["listenKey"].(string); ok {
-		logrus.Infof("成功创建listenKey: %s", listenKey[:16]+"...") // 只显示前16个字符保护隐私
+		logrus.Infof("成功创建listenKey: %s", listenKey[:16]+"...")
 		return listenKey, nil
 	}
 
@@ -1366,7 +1370,6 @@ func (b *Binance) SubscribeToMarkPrice(symbol string, publishFunc func(types.Met
 		return fmt.Errorf("websocket not initialized")
 	}
 
-	b.wsClient.publishFunc = publishFunc
 	streamName := fmt.Sprintf("%s@markPrice@1s", strings.ToLower(strings.Replace(symbol, "/", "", -1)))
 	return b.wsClient.SubscribeStream(streamName)
 }
@@ -1385,27 +1388,20 @@ func (b *Binance) UnsubscribeFromMarkPrice(symbol string) error {
 
 // SubscribeToUserData 订阅用户数据流
 func (b *Binance) SubscribeToUserData(publishFunc func(types.MetaData, interface{}) error) error {
-	if b.wsClient == nil {
-		return fmt.Errorf("websocket not initialized")
+	if b.userDataStream == nil {
+		return fmt.Errorf("user data stream not initialized")
 	}
 
-	// 创建listenKey
-	listenKey, err := b.CreateListenKey()
-	if err != nil {
-		return fmt.Errorf("创建listenKey失败: %w", err)
-	}
-
-	// 启动用户数据流WebSocket
-	return b.wsClient.SubscribeUserData(listenKey, publishFunc)
+	return b.userDataStream.Start(publishFunc)
 }
 
 // UnsubscribeFromUserData 取消订阅用户数据流
 func (b *Binance) UnsubscribeFromUserData() error {
-	if b.wsClient == nil {
-		return fmt.Errorf("websocket not initialized")
+	if b.userDataStream == nil {
+		return fmt.Errorf("user data stream not initialized")
 	}
 
-	return b.wsClient.UnsubscribeUserData()
+	return b.userDataStream.Stop()
 }
 
 // GetWebSocketClient 获取WebSocket客户端
@@ -1415,8 +1411,16 @@ func (b *Binance) GetWebSocketClient() *WebSocket {
 
 // SetWebSocketReconnectHandler 设置WebSocket重连处理器
 func (b *Binance) SetWebSocketReconnectHandler(handler func(int, error)) {
+	// 为普通连接池设置重连处理器
 	if b.wsClient != nil {
 		b.wsClient.SetReconnectHandler(handler)
+	}
+}
+
+// SetUserDataReconnectHandler 设置用户数据流重连处理器
+func (b *Binance) SetUserDataReconnectHandler(handler func(int, error)) {
+	if b.userDataStream != nil {
+		b.userDataStream.SetReconnectHandler(handler)
 	}
 }
 

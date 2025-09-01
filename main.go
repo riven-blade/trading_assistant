@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 	"trading_assistant/core"
 	"trading_assistant/pkg/config"
 	"trading_assistant/pkg/exchanges/binance"
@@ -82,8 +83,11 @@ func main() {
 		logrus.Info("WebSocket已启动")
 	}
 
+	// 等待WebSocket连接稳定后再启动订阅
+	time.Sleep(3 * time.Second)
+
 	// 启动价格订阅
-	if err := marketManager.StartOrderBookSubscriptions(); err != nil {
+	if err := marketManager.StartPriceSubscriptions(); err != nil {
 		logrus.Errorf("启动价格订阅失败: %v", err)
 	}
 
@@ -118,7 +122,7 @@ func gracefulShutdown(server *servers.HTTPServer, binanceClient *binance.Binance
 
 	// 停止价格订阅
 	if marketManager != nil {
-		marketManager.StopOrderBookSubscriptions()
+		marketManager.StopPriceSubscriptions()
 	}
 
 	// 停止核心组件

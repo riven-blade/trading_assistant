@@ -25,49 +25,34 @@ func NewMarketManager(binanceClient *binance.Binance) *MarketManager {
 	}
 }
 
-// GetPriceManager 获取价格管理器
-func (mm *MarketManager) GetPriceManager() *PriceManager {
-	return mm.priceManager
-}
+// StartPriceSubscriptions 启动选中币种的markPrice订阅
+func (mm *MarketManager) StartPriceSubscriptions() error {
+	logrus.Info("开始启动选中币种的markPrice订阅...")
 
-// InitializeMarketData 初始化市场数据
-func (mm *MarketManager) InitializeMarketData() error {
-	return mm.syncMarketData()
-}
-
-// SyncPriceData 同步价格数据
-func (mm *MarketManager) SyncPriceData() error {
-	return mm.syncPriceData()
-}
-
-// StartOrderBookSubscriptions 启动选中币种的OrderBook订阅
-func (mm *MarketManager) StartOrderBookSubscriptions() error {
-	logrus.Info("开始启动选中币种的OrderBook订阅...")
-
-	// 启动OrderBook管理器
+	// 启动价格管理器
 	if err := mm.priceManager.Start(); err != nil {
-		return fmt.Errorf("启动OrderBook管理器失败: %v", err)
+		return fmt.Errorf("启动价格管理器失败: %v", err)
 	}
 
 	// 同步订阅状态
 	if err := mm.priceManager.SyncSubscriptions(); err != nil {
-		return fmt.Errorf("同步OrderBook订阅状态失败: %v", err)
+		return fmt.Errorf("同步markPrice订阅状态失败: %v", err)
 	}
 
-	logrus.Info("OrderBook订阅启动完成")
+	logrus.Info("markPrice订阅启动完成")
 	return nil
 }
 
-// StopOrderBookSubscriptions 停止OrderBook订阅
-func (mm *MarketManager) StopOrderBookSubscriptions() {
+// StopPriceSubscriptions 停止markPrice订阅
+func (mm *MarketManager) StopPriceSubscriptions() {
 	if mm.priceManager != nil {
 		mm.priceManager.Stop()
 		logrus.Info("价格订阅已停止")
 	}
 }
 
-// SyncOrderBookSubscriptions 同步OrderBook订阅状态
-func (mm *MarketManager) SyncOrderBookSubscriptions() error {
+// SyncPriceSubscriptions 同步markPrice订阅状态
+func (mm *MarketManager) SyncPriceSubscriptions() error {
 	if mm.priceManager == nil || !mm.priceManager.IsRunning() {
 		return fmt.Errorf("价格管理器未运行")
 	}
@@ -75,8 +60,8 @@ func (mm *MarketManager) SyncOrderBookSubscriptions() error {
 	return mm.priceManager.SyncSubscriptions()
 }
 
-// GetOrderBookSubscriptionStatus 获取价格订阅状态
-func (mm *MarketManager) GetOrderBookSubscriptionStatus() map[string]*PriceSubscription {
+// GetPriceSubscriptionStatus 获取价格订阅状态
+func (mm *MarketManager) GetPriceSubscriptionStatus() map[string]*PriceSubscription {
 	if mm.priceManager == nil {
 		return make(map[string]*PriceSubscription)
 	}

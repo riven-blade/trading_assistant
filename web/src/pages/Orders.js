@@ -621,6 +621,8 @@ const Orders = () => {
                           }}
                           style={{ minWidth: 200 }}
                           allowClear
+                          listHeight={200}
+                          virtual={false}
                         >
                           <Select.Option value="">
                             <Space>
@@ -747,6 +749,8 @@ const Orders = () => {
                           }}
                           style={{ minWidth: 200 }}
                           allowClear
+                          listHeight={200}
+                          virtual={false}
                         >
                           <Select.Option value="">
                             <Space>

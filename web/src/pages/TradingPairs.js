@@ -59,7 +59,7 @@ const TradingPairs = () => {
   const [filteredPairs, setFilteredPairs] = useState([]);
   
   // 排序相关状态
-  const [sortBy, setSortBy] = useState('price_change_percent'); // 排序字段
+  const [sortBy, setSortBy] = useState('quote_volume'); // 排序字段
   const [sortOrder, setSortOrder] = useState('desc'); // 排序顺序
 
   // 交易相关状态
@@ -99,11 +99,34 @@ const TradingPairs = () => {
     getPriceBySymbol
   } = usePriceData();
 
+  // 全局排名映射
+  const [globalVolumeRanks, setGlobalVolumeRanks] = useState({});
+
   // 初始化
   useEffect(() => {
     fetchSelectedPairs();
     fetchAllPairs();
   }, []);
+
+  // 计算全局成交额排名
+  useEffect(() => {
+    if (allPairs.length > 0) {
+      // 按成交额降序排序所有币种
+      const sortedPairs = [...allPairs].sort((a, b) => {
+        const aVolume = parseFloat(a.quote_volume || '0');
+        const bVolume = parseFloat(b.quote_volume || '0');
+        return bVolume - aVolume;
+      });
+
+      // 创建排名映射
+      const ranks = {};
+      sortedPairs.forEach((pair, index) => {
+        ranks[pair.symbol] = index + 1;
+      });
+
+      setGlobalVolumeRanks(ranks);
+    }
+  }, [allPairs]);
 
   // 搜索过滤和排序
   useEffect(() => {
@@ -553,7 +576,14 @@ const TradingPairs = () => {
         <Empty description="暂无选中的交易对" />
       ) : (
         <Row gutter={[16, 16]}>
-          {selectedPairs.map((pair) => (
+          {selectedPairs
+            .sort((a, b) => {
+              // 按交易额降序排序
+              const aVolume = parseFloat(a.quote_volume || '0');
+              const bVolume = parseFloat(b.quote_volume || '0');
+              return bVolume - aVolume;
+            })
+            .map((pair) => (
             <Col 
               xs={24} 
               sm={12} 
@@ -574,6 +604,7 @@ const TradingPairs = () => {
                 canDeleteSymbol={canDeleteSymbol}
                 getDeleteDisabledReason={getDeleteDisabledReason}
                 isMobile={isMobile}
+                volumeRank={globalVolumeRanks[pair.symbol]}
               />
             </Col>
           ))}

@@ -12,8 +12,6 @@ import (
 	"trading_assistant/pkg/exchanges/types"
 
 	"trading_assistant/pkg/exchanges"
-
-	"github.com/sirupsen/logrus"
 )
 
 // WebSocketConfig WebSocket配置
@@ -30,10 +28,10 @@ type WebSocketConfig struct {
 func DefaultWebSocketConfig() *WebSocketConfig {
 	return &WebSocketConfig{
 		MaxConnections:       10,
-		StreamsPerConnection: 800,
+		StreamsPerConnection: 100, // 降低单连接负载，强制分散
 		MaxReconnectAttempts: 5,
-		BatchSize:            200,
-		BatchInterval:        50 * time.Millisecond,
+		BatchSize:            50,                     // 减小批量大小，更频繁处理
+		BatchInterval:        100 * time.Millisecond, // 增加间隔，减少压力
 		HealthCheckInterval:  30 * time.Second,
 	}
 }
@@ -60,13 +58,9 @@ type WebSocket struct {
 	// 重连事件处理函数
 	reconnectHandler func(int, error)
 
-	// 用户数据流相关
-	userDataListenKey   string
-	userDataPublishFunc func(types.MetaData, interface{}) error
-	userDataConnection  *exchanges.WebSocketConnection
-	userDataActive      int32 // 0=未激活, 1=已激活
-	userDataStopCh      chan struct{}
-	userDataWg          sync.WaitGroup
+	// 全局订阅状态跟踪
+	allStreams    map[string]bool // 所有活跃的订阅流
+	allStreamsMux sync.RWMutex    // 保护allStreams
 
 	// 状态
 	isRunning   int32
@@ -87,6 +81,8 @@ type WSConnection struct {
 	streamCount int32
 	isHealthy   int32
 	lastUsed    time.Time
+	streams     map[string]bool // 跟踪此连接上的订阅流
+	streamsMux  sync.RWMutex    // 保护streams map
 }
 
 // NewWebSocket 创建WebSocket客户端
@@ -105,6 +101,7 @@ func NewWebSocket(exchange *Binance, config *WebSocketConfig) *WebSocket {
 		ctx:            ctx,
 		cancel:         cancel,
 		lastMsgTime:    time.Now().UnixMilli(),
+		allStreams:     make(map[string]bool),
 	}
 
 	return ws
@@ -157,7 +154,12 @@ func (ws *WebSocket) SubscribeStream(streamName string) error {
 		return fmt.Errorf("websocket not running")
 	}
 
-	// 直接添加到批量队列
+	// 记录到全局订阅状态
+	ws.allStreamsMux.Lock()
+	ws.allStreams[streamName] = true
+	ws.allStreamsMux.Unlock()
+
+	// 添加到批量队列
 	ws.addToBatch(streamName)
 	return nil
 }
@@ -167,6 +169,11 @@ func (ws *WebSocket) UnsubscribeStream(streamName string) error {
 	if atomic.LoadInt32(&ws.isRunning) == 0 {
 		return fmt.Errorf("websocket not running")
 	}
+
+	// 从全局订阅状态中删除
+	ws.allStreamsMux.Lock()
+	delete(ws.allStreams, streamName)
+	ws.allStreamsMux.Unlock()
 
 	conn := ws.selectBestConnection()
 	if conn == nil {
@@ -212,6 +219,7 @@ func (ws *WebSocket) createConnection() error {
 		ws:        wsInst,
 		isHealthy: 1,
 		lastUsed:  time.Now(),
+		streams:   make(map[string]bool),
 	}
 
 	// 设置消息处理器
@@ -283,13 +291,12 @@ func (ws *WebSocket) parseAndPublish(msg map[string]interface{}) error {
 		}
 	}
 
-	// 对于用户数据流事件，symbol可能为空或从其他字段获取，这是正常的
 	if eventType == "" {
 		return nil
 	}
 
-	// 非用户数据流事件需要symbol
-	if symbol == "" && !ws.isUserDataEvent(eventType) {
+	// 市场数据事件需要symbol
+	if symbol == "" {
 		return nil
 	}
 
@@ -304,10 +311,6 @@ func (ws *WebSocket) parseAndPublish(msg map[string]interface{}) error {
 		parsedData = ws.parseBookTicker(msg)
 	case EventTypeMarkPrice:
 		parsedData = ws.parseMarkPrice(msg)
-	case EventTypeAccountUpdate:
-		parsedData = ws.parseAccountUpdate(msg)
-	case EventTypeOrderTradeUpdate:
-		parsedData = ws.parseOrderTradeUpdate(msg)
 	default:
 		return nil
 	}
@@ -683,7 +686,7 @@ type MessageRateLimiter struct {
 
 func NewMessageRateLimiter() *MessageRateLimiter {
 	return &MessageRateLimiter{
-		interval: 200 * time.Millisecond,
+		interval: 150 * time.Millisecond, // 稍微降低间隔，配合小批量
 	}
 }
 
@@ -794,9 +797,17 @@ func (ws *WebSocket) processBatch(streams []string) {
 		return
 	}
 
-	// 更新连接的流计数
+	// 更新连接的流计数和订阅跟踪
 	atomic.AddInt32(&conn.streamCount, int32(len(streams)))
 	conn.lastUsed = time.Now()
+
+	// 跟踪此连接上的订阅流
+	conn.streamsMux.Lock()
+	for i := range streams {
+		stream := streams[i]
+		conn.streams[stream] = true
+	}
+	conn.streamsMux.Unlock()
 }
 
 func (ws *WebSocket) selectBestConnection() *WSConnection {
@@ -818,8 +829,8 @@ func (ws *WebSocket) selectBestConnection() *WSConnection {
 		}
 	}
 
-	// 如果没有可用连接，尝试创建新连接
-	if bestConn == nil || minLoad > int32(ws.config.StreamsPerConnection*3/4) {
+	// 积极创建新连接分散负载
+	if bestConn == nil || minLoad > int32(ws.config.StreamsPerConnection/2) { // 降低阈值，更早分散
 		if len(ws.connections) < ws.config.MaxConnections {
 			if err := ws.createConnectionUnsafe(); err == nil {
 				if len(ws.connections) > 0 {
@@ -849,6 +860,7 @@ func (ws *WebSocket) createConnectionUnsafe() error {
 		ws:        wsInst,
 		isHealthy: 1,
 		lastUsed:  time.Now(),
+		streams:   make(map[string]bool),
 	}
 
 	wsInst.SetHandler(func(data []byte) error {
@@ -859,6 +871,11 @@ func (ws *WebSocket) createConnectionUnsafe() error {
 		atomic.StoreInt32(&conn.isHealthy, 0)
 	})
 
+	// 设置重连处理器
+	wsInst.SetReconnectHandler(func(attempt int, err error) {
+		ws.handleReconnectEvent(attempt, err)
+	})
+
 	ws.connections = append(ws.connections, conn)
 	return nil
 }
@@ -867,6 +884,11 @@ func (ws *WebSocket) closeConnection(conn *WSConnection) {
 	if conn.ws != nil {
 		conn.ws.Close()
 	}
+
+	// 清理连接的订阅跟踪
+	conn.streamsMux.Lock()
+	conn.streams = make(map[string]bool)
+	conn.streamsMux.Unlock()
 }
 
 func (ws *WebSocket) healthChecker() {
@@ -889,9 +911,18 @@ func (ws *WebSocket) checkHealth() {
 	ws.connMutex.Lock()
 	defer ws.connMutex.Unlock()
 
+	var lostStreams []string
+
 	for i := len(ws.connections) - 1; i >= 0; i-- {
 		conn := ws.connections[i]
 		if atomic.LoadInt32(&conn.isHealthy) == 0 || !conn.ws.IsConnected() {
+			// 收集丢失的订阅流
+			conn.streamsMux.RLock()
+			for stream := range conn.streams {
+				lostStreams = append(lostStreams, stream)
+			}
+			conn.streamsMux.RUnlock()
+
 			ws.closeConnection(conn)
 			ws.connections = append(ws.connections[:i], ws.connections[i+1:]...)
 		}
@@ -900,6 +931,17 @@ func (ws *WebSocket) checkHealth() {
 	// 如果没有健康连接，创建新连接
 	if len(ws.connections) == 0 {
 		ws.createConnectionUnsafe()
+	}
+
+	// 恢复丢失的订阅
+	for i := range lostStreams {
+		stream := lostStreams[i]
+		ws.allStreamsMux.RLock()
+		if ws.allStreams[stream] {
+			// 只恢复仍然活跃的订阅
+			ws.addToBatch(stream)
+		}
+		ws.allStreamsMux.RUnlock()
 	}
 }
 
@@ -917,244 +959,14 @@ func (ws *WebSocket) getWebSocketURL() string {
 	return "wss://stream.binance.com:9443/ws"
 }
 
-// ========== 用户数据流管理 ==========
-
-// SubscribeUserData 订阅用户数据流
-func (ws *WebSocket) SubscribeUserData(listenKey string, publishFunc func(types.MetaData, interface{}) error) error {
-	if atomic.LoadInt32(&ws.userDataActive) == 1 {
-		return fmt.Errorf("user data stream already active")
-	}
-
-	ws.userDataListenKey = listenKey
-	ws.userDataPublishFunc = publishFunc
-	ws.userDataStopCh = make(chan struct{})
-
-	// 启动用户数据流连接
-	ws.userDataWg.Add(1)
-	go ws.startUserDataStream()
-
-	// 启动listenKey刷新
-	ws.userDataWg.Add(1)
-	go ws.keepaliveListenKey()
-
-	atomic.StoreInt32(&ws.userDataActive, 1)
-	return nil
-}
-
-// UnsubscribeUserData 取消订阅用户数据流
-func (ws *WebSocket) UnsubscribeUserData() error {
-	if atomic.LoadInt32(&ws.userDataActive) == 0 {
-		return nil
-	}
-
-	atomic.StoreInt32(&ws.userDataActive, 0)
-	close(ws.userDataStopCh)
-	ws.userDataWg.Wait()
-
-	// 关闭连接
-	if ws.userDataConnection != nil {
-		ws.userDataConnection.Close()
-		ws.userDataConnection = nil
-	}
-
-	// 关闭listenKey
-	if ws.userDataListenKey != "" && ws.exchange != nil {
-		ws.exchange.CloseListenKey(ws.userDataListenKey)
-		ws.userDataListenKey = ""
-	}
-
-	return nil
-}
-
-// startUserDataStream 启动用户数据流连接
-func (ws *WebSocket) startUserDataStream() {
-	defer ws.userDataWg.Done()
-
-	for {
-		select {
-		case <-ws.userDataStopCh:
-			return
-		default:
-			if err := ws.connectUserDataStream(); err != nil {
-				logrus.Errorf("用户数据流连接失败: %v", err)
-				time.Sleep(5 * time.Second)
-				continue
-			}
-
-			// 连接成功，等待连接关闭或停止信号
-			select {
-			case <-ws.userDataStopCh:
-				return
-			case <-time.After(24 * time.Hour): // 24小时后重连
-				logrus.Info("用户数据流24小时重连")
-				if ws.userDataConnection != nil {
-					ws.userDataConnection.Close()
-				}
-			}
-		}
-	}
-}
-
-// connectUserDataStream 连接用户数据流
-func (ws *WebSocket) connectUserDataStream() error {
-	if ws.userDataListenKey == "" {
-		return fmt.Errorf("listenKey为空")
-	}
-
-	// 构建WebSocket URL - 用户数据流URL格式: wss://fstream.binance.com/ws/{listenKey}
-	baseURL := ws.getUserDataWebSocketURL()
-	url := fmt.Sprintf("%s/%s", baseURL, ws.userDataListenKey)
-
-	// 创建WebSocket连接，使用主context以便在停止时能够取消
-	conn, err := exchanges.NewWebSocketConnection(ws.ctx, url, 5) // 最大重连5次
-	if err != nil {
-		logrus.Errorf("用户数据流连接失败，URL: %s, 错误: %v", url, err)
-		return fmt.Errorf("创建用户数据流连接失败: %w", err)
-	}
-
-	// 设置消息处理器
-	conn.SetHandler(func(data []byte) error {
-		return ws.handleUserDataMessage(data)
-	})
-
-	// 设置错误处理器
-	conn.SetErrorHandler(func(err error) {
-		logrus.Errorf("用户数据流连接错误: %v", err)
-	})
-
-	// 设置重连处理器
-	conn.SetReconnectHandler(func(attempt int, err error) {
-		ws.handleReconnectEvent(attempt, err)
-	})
-
-	ws.userDataConnection = conn
-	logrus.Info("用户数据流连接成功")
-	return nil
-}
-
-// handleUserDataMessage 处理用户数据流消息
-func (ws *WebSocket) handleUserDataMessage(data []byte) error {
-	if ws.userDataPublishFunc == nil {
-		logrus.Warnf("用户数据流发布函数为空，跳过消息处理")
-		return nil
-	}
-
-	var msg map[string]interface{}
-	if err := json.Unmarshal(data, &msg); err != nil {
-		logrus.Errorf("用户数据流消息JSON解析失败: %v", err)
-		return err
-	}
-
-	// 获取事件类型
-	eventType, _ := msg[FieldEventType].(string)
-	if eventType == "" {
-		logrus.Warnf("用户数据流消息缺少事件类型，跳过处理")
-		return nil
-	}
-
-	// 根据事件类型解析数据
-	var parsedData interface{}
-	switch eventType {
-	case EventTypeAccountUpdate:
-		parsedData = ws.parseAccountUpdate(msg)
-	case EventTypeOrderTradeUpdate:
-		parsedData = ws.parseOrderTradeUpdate(msg)
-	case "TRADE_LITE":
-		// TRADE_LITE事件暂时跳过处理
-		return nil
-	default:
-		logrus.Debugf("未知的用户数据流事件类型: %s, 跳过处理", eventType)
-		return nil
-	}
-
-	if parsedData == nil {
-		logrus.Warnf("用户数据流消息解析结果为空，事件类型: %s", eventType)
-		return nil
-	}
-
-	// 构造MetaData
-	metaData := types.MetaData{
-		Exchange:  "binance",
-		Market:    ws.getMarketType(),
-		DataType:  ws.convertEventTypeToDataType(eventType),
-		Timestamp: ws.extractTimestamp(msg),
-	}
-
-	// 调用发布函数
-	if err := ws.userDataPublishFunc(metaData, parsedData); err != nil {
-		logrus.Errorf("用户数据流发布函数调用失败: %v", err)
-		return err
-	}
-	return nil
-}
-
-// keepaliveListenKey 保持listenKey活跃
-func (ws *WebSocket) keepaliveListenKey() {
-	defer ws.userDataWg.Done()
-
-	ticker := time.NewTicker(30 * time.Minute) // 每30分钟刷新一次
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ws.userDataStopCh:
-			return
-		case <-ticker.C:
-			if ws.userDataListenKey != "" && ws.exchange != nil {
-				if err := ws.exchange.KeepaliveListenKey(ws.userDataListenKey); err != nil {
-					logrus.Errorf("刷新listenKey失败: %v, 将重新创建连接", err)
-					// 刷新失败时重新创建连接
-					go ws.recreateUserDataConnection()
-				} else {
-					logrus.Info("listenKey刷新成功")
-				}
-			}
-		}
-	}
-}
-
-// getUserDataWebSocketURL 获取用户数据流WebSocket URL
-func (ws *WebSocket) getUserDataWebSocketURL() string {
-	// 用户数据流使用标准的WebSocket URL（包含/ws路径）
-	if ws.exchange != nil && ws.exchange.config != nil {
-		return ws.exchange.config.GetWebSocketURL()
-	}
-
-	return "wss://fstream.binance.com/ws"
-}
-
-// recreateUserDataConnection 重新创建用户数据流连接
-func (ws *WebSocket) recreateUserDataConnection() {
-	logrus.Warn("开始重新创建用户数据流连接")
-
-	// 关闭当前连接
-	if ws.userDataConnection != nil {
-		ws.userDataConnection.Close()
-		ws.userDataConnection = nil
-	}
-
-	// 创建新的listenKey
-	if ws.exchange != nil {
-		if newListenKey, err := ws.exchange.CreateListenKey(); err == nil {
-			ws.userDataListenKey = newListenKey
-			logrus.Infof("重新创建listenKey成功: %s", newListenKey[:16]+"...")
-		} else {
-			logrus.Errorf("重新创建listenKey失败: %v", err)
-			return
-		}
-	}
-
-	// 尝试重新连接
-	if err := ws.connectUserDataStream(); err != nil {
-		logrus.Errorf("重新创建用户数据流连接失败: %v", err)
-	} else {
-		logrus.Info("用户数据流连接重新创建成功")
-	}
-}
-
 // SetReconnectHandler 设置重连事件处理器
 func (ws *WebSocket) SetReconnectHandler(handler func(int, error)) {
 	ws.reconnectHandler = handler
+}
+
+// SetPublishFunc 设置数据发布函数
+func (ws *WebSocket) SetPublishFunc(publishFunc func(types.MetaData, interface{}) error) {
+	ws.publishFunc = publishFunc
 }
 
 // handleReconnectEvent 处理重连事件

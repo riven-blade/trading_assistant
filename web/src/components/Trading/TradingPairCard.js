@@ -15,6 +15,7 @@ import { LineChartOutlined } from '@ant-design/icons';
  * @param {Function} canDeleteSymbol - 检查是否可删除
  * @param {Function} getDeleteDisabledReason - 获取删除禁用原因
  * @param {boolean} isMobile - 是否为移动端
+ * @param {number} volumeRank - 成交额排名
  */
 const TradingPairCard = ({ 
   pair, 
@@ -27,7 +28,8 @@ const TradingPairCard = ({
   symbolEstimates,
   canDeleteSymbol,
   getDeleteDisabledReason,
-  isMobile = false
+  isMobile = false,
+  volumeRank
 }) => {
   const symbol = pair.symbol;
   const hasValidPrice = priceInfo && priceInfo.markPrice > 0;
@@ -46,6 +48,16 @@ const TradingPairCard = ({
     if (!percent) return null;
     const value = parseFloat(percent) || 0;
     return `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  };
+
+  // 格式化交易额
+  const formatVolume = (volume) => {
+    if (!volume) return 'N/A';
+    const numVolume = Number(volume) || 0;
+    if (numVolume >= 1000000000) return `${(numVolume / 1000000000).toFixed(1)}B`;
+    if (numVolume >= 1000000) return `${(numVolume / 1000000).toFixed(1)}M`;
+    if (numVolume >= 1000) return `${(numVolume / 1000).toFixed(1)}K`;
+    return numVolume.toFixed(0);
   };
 
   return (
@@ -141,11 +153,42 @@ const TradingPairCard = ({
               )}
             </div>
             
-            {/* 资金费率 */}
-            {!isMobile && priceInfo?.fundingRate !== undefined && (
+            {/* 交易额显示 */}
+            {pair.quote_volume && (
               <div style={{ 
                 textAlign: 'center',
                 fontSize: '11px',
+                color: '#6b7280',
+                marginBottom: '4px'
+              }}>
+                <span>成交额: </span>
+                <span style={{ 
+                  color: '#374151',
+                  fontWeight: '600'
+                }}>
+                  ${formatVolume(pair.quote_volume)}
+                </span>
+                {volumeRank && (
+                  <span style={{ 
+                    marginLeft: '8px',
+                    padding: '1px 4px',
+                    backgroundColor: '#f3f4f6',
+                    borderRadius: '4px',
+                    fontSize: '10px',
+                    color: '#6b7280',
+                    fontWeight: '500'
+                  }}>
+                    #{volumeRank}
+                  </span>
+                )}
+              </div>
+            )}
+
+            {/* 资金费率 - 移动端也显示 */}
+            {priceInfo?.fundingRate !== undefined && (
+              <div style={{ 
+                textAlign: 'center',
+                fontSize: isMobile ? '10px' : '11px',
                 color: '#6b7280'
               }}>
                 <span>资金费率: </span>
@@ -153,7 +196,7 @@ const TradingPairCard = ({
                   color: priceInfo.fundingRate >= 0 ? '#059669' : '#dc2626',
                   fontWeight: '600'
                 }}>
-                  {(priceInfo.fundingRate).toFixed(4)}%
+                  {(priceInfo.fundingRate * 100).toFixed(4)}%
                 </span>
               </div>
             )}

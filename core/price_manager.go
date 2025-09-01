@@ -62,6 +62,12 @@ func (pm *PriceManager) Start() error {
 	// 设置WebSocket重连处理器
 	pm.binanceClient.SetWebSocketReconnectHandler(pm.handleWebSocketReconnect)
 
+	// 设置统一的价格数据处理器
+	wsClient := pm.binanceClient.GetWebSocketClient()
+	if wsClient != nil {
+		wsClient.SetPublishFunc(pm.createPriceHandler())
+	}
+
 	// 启动选中币种的订阅
 	if err := pm.subscribeSelectedCoins(); err != nil {
 		logrus.Errorf("启动选中币种价格订阅失败: %v", err)
@@ -120,8 +126,7 @@ func (pm *PriceManager) SubscribePrice(symbol string) error {
 	}
 
 	// 订阅markPrice
-	publishFunc := pm.createPriceHandler()
-	err := pm.binanceClient.SubscribeToMarkPrice(symbol, publishFunc)
+	err := pm.binanceClient.SubscribeToMarkPrice(symbol, nil)
 	if err != nil {
 		subscription.Status = "error"
 		subscription.ErrorMsg = err.Error()
@@ -231,8 +236,7 @@ func (pm *PriceManager) subscribePriceWithoutLock(symbol string) error {
 		LastData:  time.Time{},
 	}
 
-	publishFunc := pm.createPriceHandler()
-	err := pm.binanceClient.SubscribeToMarkPrice(symbol, publishFunc)
+	err := pm.binanceClient.SubscribeToMarkPrice(symbol, nil)
 	if err != nil {
 		subscription.Status = "error"
 		subscription.ErrorMsg = err.Error()
@@ -414,6 +418,16 @@ func (pm *PriceManager) handleWebSocketReconnect(attempt int, err error) {
 		// 重连成功
 		message := fmt.Sprintf("WebSocket重连成功 (尝试次数: %d)", attempt)
 		logrus.Infof("WebSocket重连成功，尝试次数: %d", attempt)
+
+		// 重连成功后恢复所有markPrice订阅
+		go func() {
+			logrus.Info("WebSocket重连成功，开始恢复markPrice订阅...")
+			if syncErr := pm.SyncSubscriptions(); syncErr != nil {
+				logrus.Errorf("重连后恢复markPrice订阅失败: %v", syncErr)
+			} else {
+				logrus.Info("重连后markPrice订阅恢复完成")
+			}
+		}()
 
 		// 发送Telegram通知
 		if telegram.GlobalTelegramClient != nil {

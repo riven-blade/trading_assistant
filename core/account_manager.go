@@ -54,16 +54,16 @@ func InitAccountManager(binanceClient *binance.Binance) {
 // Start 启动账户管理器，开始实时监听用户数据流
 func (am *AccountManager) Start() {
 	if am.running {
-		logrus.Warn("账户监控已在运行")
+		logrus.Warn("账户监控已在运行，跳过重复启动")
 		return
 	}
 
 	am.running = true
 	logrus.Info("启动账户管理器，开始实时监听...")
 
-	// 设置用户数据流WebSocket重连处理器
+	// 设置用户数据流重连处理器
 	if am.binanceClient != nil {
-		am.binanceClient.SetWebSocketReconnectHandler(am.handleUserDataReconnect)
+		am.binanceClient.SetUserDataReconnectHandler(am.handleUserDataReconnect)
 	}
 
 	// 初始化基础数据
@@ -158,7 +158,6 @@ func (am *AccountManager) startUserDataStream() {
 		return
 	}
 
-	logrus.Info("用户数据流监听已启动，实时监控账户变化")
 }
 
 // handleUserDataMessage 处理用户数据流消息
@@ -527,19 +526,11 @@ func (am *AccountManager) refreshPositions(skipTelegram bool) {
 		mps = append(mps, positionModel)
 	}
 
-	// 缓存到Redis
+	// 存储持仓信息到Redis
 	if redis.GlobalRedisClient != nil {
-		// 清理旧的持仓缓存
-		if err := redis.GlobalRedisClient.DeleteCache(redis.CacheKeyPositions + "*"); err != nil {
-			logrus.Errorf("清理旧持仓缓存失败: %v", err)
-		}
-
-		// 缓存新的持仓数据
-		cacheKey := redis.CacheKeyPositions
-		if err := redis.GlobalRedisClient.SetCacheWithExpiration(cacheKey, positions, 0); err != nil {
-			logrus.Errorf("缓存持仓数据失败: %v", err)
-		} else {
-			logrus.Infof("已缓存 %d 个持仓到Redis", len(positions))
+		// 清理所有旧的持仓数据
+		if err := redis.GlobalRedisClient.ClearAllPositions(); err != nil {
+			logrus.Errorf("清理旧持仓数据失败: %v", err)
 		}
 
 		// 自动选择有仓位的币种
@@ -553,6 +544,7 @@ func (am *AccountManager) refreshPositions(skipTelegram bool) {
 			}
 		}
 
+		logrus.Infof("已存储 %d 个持仓到Redis", len(mps))
 	}
 
 	// 计算总盈亏

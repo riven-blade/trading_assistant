@@ -17,6 +17,7 @@ type WebSocketConnection struct {
 	url            string
 	isConnected    bool
 	pingInterval   time.Duration // 心跳间隔，默认30秒
+	enablePing     bool          // 是否启用ping机制
 	autoReconnect  bool          // 是否自动重连
 	maxReconnect   int           // 最大重连次数
 	reconnectCount int           // 当前重连次数
@@ -37,6 +38,7 @@ func NewWebSocketConnection(ctx context.Context, url string, maxReconnect int) (
 		url:            url,
 		isConnected:    false,
 		pingInterval:   30 * time.Second,
+		enablePing:     true,             // 默认启用ping
 		autoReconnect:  maxReconnect > 0, // 只有当maxReconnect > 0时才启用自动重连
 		maxReconnect:   maxReconnect,
 		reconnectCount: 0,
@@ -238,6 +240,25 @@ func (ws *WebSocketConnection) SetPingInterval(interval time.Duration) {
 	ws.pingInterval = interval
 }
 
+// SetPingEnabled 设置是否启用ping机制
+func (ws *WebSocketConnection) SetPingEnabled(enabled bool) {
+	ws.mutex.Lock()
+	defer ws.mutex.Unlock()
+	ws.enablePing = enabled
+
+	// 如果禁用ping且当前连接存在，需要重启pingLoop
+	if !enabled && ws.isConnected && ws.cancel != nil {
+		// 取消当前context，这会停止现有的pingLoop
+		ws.cancel()
+		// 创建新的context重启协程
+		wsCtx, cancel := context.WithCancel(context.Background())
+		ws.ctx = wsCtx
+		ws.cancel = cancel
+		// 重启messageLoop但不启动pingLoop
+		go ws.messageLoop()
+	}
+}
+
 // SendRawMessage 发送原始字节消息
 func (ws *WebSocketConnection) SendRawMessage(data []byte) error {
 	ws.mutex.Lock()
@@ -263,6 +284,11 @@ func (ws *WebSocketConnection) SendRawMessage(data []byte) error {
 
 // pingLoop ping保活循环
 func (ws *WebSocketConnection) pingLoop() {
+	// 如果禁用ping，直接返回
+	if !ws.enablePing {
+		return
+	}
+
 	ticker := time.NewTicker(ws.pingInterval)
 	defer ticker.Stop()
 

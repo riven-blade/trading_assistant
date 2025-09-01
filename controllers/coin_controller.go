@@ -71,14 +71,14 @@ func (c *CoinController) SelectCoin(ctx *gin.Context) {
 		logrus.Infof("币种 %s 已取消选中", req.Symbol)
 	}
 
-	// 自动管理OrderBook订阅状态
+	// 自动管理markPrice订阅状态
 	subscriptionSynced := false
 	if c.marketManager != nil {
-		if err := c.marketManager.SyncOrderBookSubscriptions(); err != nil {
-			logrus.Errorf("同步OrderBook订阅状态失败: %v", err)
+		if err := c.marketManager.SyncPriceSubscriptions(); err != nil {
+			logrus.Errorf("同步markPrice订阅状态失败: %v", err)
 		} else {
 			subscriptionSynced = true
-			logrus.Debugf("OrderBook订阅状态已自动同步")
+			logrus.Debugf("markPrice订阅状态已自动同步")
 		}
 	}
 
@@ -98,7 +98,7 @@ func (c *CoinController) SelectCoin(ctx *gin.Context) {
 
 	// 如果启用了OrderBook管理器，返回订阅状态信息
 	if c.marketManager != nil {
-		orderBookStatus := c.marketManager.GetOrderBookSubscriptionStatus()
+		orderBookStatus := c.marketManager.GetPriceSubscriptionStatus()
 		response["orderbook_subscriptions"] = gin.H{
 			"total_count": len(orderBookStatus),
 			"symbol_status": func() string {
