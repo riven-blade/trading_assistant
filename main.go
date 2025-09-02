@@ -79,8 +79,6 @@ func main() {
 	// 启动WebSocket连接
 	if err := binanceClient.StartWebSocket(); err != nil {
 		logrus.Errorf("启动WebSocket失败: %v", err)
-	} else {
-		logrus.Info("WebSocket已启动")
 	}
 
 	// 等待WebSocket连接稳定后再启动订阅

@@ -66,6 +66,9 @@ func New(config *Config) (*Binance, error) {
 	// 设置凭证
 	binance.SetCredentials(config.APIKey, config.Secret, "", "")
 
+	// 初始同步服务器时间
+	go binance.updateServerTimeOffset()
+
 	// 初始化WebSocket (如果启用)
 	if config.EnableWebSocket {
 		wsConfig := DefaultWebSocketConfig()
@@ -280,7 +283,7 @@ func (b *Binance) signRequest(method, endpoint string, params map[string]interfa
 	}
 
 	// 添加时间戳
-	params["timestamp"] = time.Now().UnixMilli()
+	params["timestamp"] = b.GetServerTime()
 
 	// 添加接收窗口
 	if b.config.RecvWindow > 0 {
@@ -365,7 +368,7 @@ func (b *Binance) post(endpoint string, params map[string]interface{}, signed bo
 
 	if signed {
 		// 签名请求
-		params["timestamp"] = time.Now().UnixMilli()
+		params["timestamp"] = b.GetServerTime()
 		var path string
 		path, headers, body, err = b.signRequest("POST", endpoint, params)
 		if err != nil {
@@ -411,7 +414,7 @@ func (b *Binance) put(endpoint string, params map[string]interface{}, signed boo
 
 	if signed {
 		// 签名请求
-		params["timestamp"] = time.Now().UnixMilli()
+		params["timestamp"] = b.GetServerTime()
 		var path string
 		path, headers, body, err = b.signRequest("PUT", endpoint, params)
 		if err != nil {
@@ -458,7 +461,7 @@ func (b *Binance) delete(endpoint string, params map[string]interface{}, signed 
 
 	if signed {
 		// 签名请求
-		params["timestamp"] = time.Now().UnixMilli()
+		params["timestamp"] = b.GetServerTime()
 		var path string
 		path, headers, body, err = b.signRequest("DELETE", endpoint, params)
 		if err != nil {
@@ -934,7 +937,7 @@ func (b *Binance) FetchOrders(ctx context.Context, symbol string, since int64, l
 	}
 
 	// 添加时间戳（API要求）
-	requestParams["timestamp"] = time.Now().UnixMilli()
+	requestParams["timestamp"] = b.GetServerTime()
 
 	// 选择正确的端点
 	var endpoint string
@@ -982,7 +985,7 @@ func (b *Binance) CancelOrder(ctx context.Context, symbol string, orderID string
 
 	// 构建请求参数
 	params := map[string]interface{}{
-		"timestamp": time.Now().UnixMilli(),
+		"timestamp": b.GetServerTime(),
 	}
 
 	if symbol != "" {
@@ -1364,23 +1367,29 @@ func (b *Binance) UnsubscribeFromOrderbook(symbol string) error {
 	return b.wsClient.UnsubscribeStream(streamName)
 }
 
-// SubscribeToMarkPrice 订阅标记价格
-func (b *Binance) SubscribeToMarkPrice(symbol string, publishFunc func(types.MetaData, interface{}) error) error {
+// SubscribeToMarkPrice 订阅所有币种的标记价格数组流
+func (b *Binance) SubscribeToMarkPrice(publishFunc func(types.MetaData, interface{}) error) error {
 	if b.wsClient == nil {
 		return fmt.Errorf("websocket not initialized")
 	}
 
-	streamName := fmt.Sprintf("%s@markPrice@1s", strings.ToLower(strings.Replace(symbol, "/", "", -1)))
+	// 设置发布函数
+	if publishFunc != nil {
+		b.wsClient.SetPublishFunc(publishFunc)
+	}
+
+	// 订阅所有币种的标记价格流
+	streamName := "!markPrice@arr"
 	return b.wsClient.SubscribeStream(streamName)
 }
 
-// UnsubscribeFromMarkPrice 取消订阅标记价格
-func (b *Binance) UnsubscribeFromMarkPrice(symbol string) error {
+// UnsubscribeFromMarkPrice 取消订阅标记价格数组流
+func (b *Binance) UnsubscribeFromMarkPrice() error {
 	if b.wsClient == nil {
 		return fmt.Errorf("websocket not initialized")
 	}
 
-	streamName := fmt.Sprintf("%s@markPrice@1s", strings.ToLower(strings.Replace(symbol, "/", "", -1)))
+	streamName := "!markPrice@arr"
 	return b.wsClient.UnsubscribeStream(streamName)
 }
 
@@ -1431,7 +1440,7 @@ func (b *Binance) FuturesNewOrder(params map[string]interface{}) (*FuturesOrderR
 	endpoint := "/fapi/v1/order"
 
 	// 添加时间戳
-	params["timestamp"] = time.Now().UnixMilli()
+	params["timestamp"] = b.GetServerTime()
 
 	// 签名请求
 	path, headers, body, err := b.signRequest("POST", endpoint, params)
@@ -1478,7 +1487,7 @@ func (b *Binance) SetLeverage(symbol string, leverage int) error {
 	params := map[string]interface{}{
 		"symbol":    symbol,
 		"leverage":  leverage,
-		"timestamp": time.Now().UnixMilli(),
+		"timestamp": b.GetServerTime(),
 	}
 
 	endpoint := "/fapi/v1/leverage"

@@ -23,14 +23,8 @@ type AccountManager struct {
 	binanceClient *binance.Binance // Binance客户端，用于WebSocket连接
 
 	// 防抖动定时器
-	balanceDebounceTimer  *time.Timer // 余额更新防抖动定时器
-	positionDebounceTimer *time.Timer // 仓位更新防抖动定时器
-	debounceMutex         sync.Mutex  // 定时器锁
-
-	// 兜底定时器
-	fallbackTimer    *time.Timer   // 兜底定时器，每30分钟执行一次数据同步
-	fallbackInterval time.Duration // 兜底定时器间隔
-	fallbackMutex    sync.Mutex    // 兜底定时器锁
+	accountDataDebounceTimer *time.Timer // 账户数据更新防抖动定时器
+	debounceMutex            sync.Mutex  // 定时器锁
 }
 
 // GlobalAccountManager 全局账户管理器实例
@@ -42,12 +36,8 @@ func InitAccountManager(binanceClient *binance.Binance) {
 		running:       false,
 		stopChan:      make(chan bool),
 		binanceClient: binanceClient,
-		// 初始化防抖动定时器（还未启动）
-		balanceDebounceTimer:  nil,
-		positionDebounceTimer: nil,
-		// 初始化兜底定时器（30分钟间隔）
-		fallbackTimer:    nil,
-		fallbackInterval: 30 * time.Minute,
+		// 初始化防抖动定时器
+		accountDataDebounceTimer: nil,
 	}
 }
 
@@ -71,9 +61,6 @@ func (am *AccountManager) Start() {
 
 	// 启动用户数据流WebSocket监听
 	go am.startUserDataStream()
-
-	// 启动兜底定时器
-	go am.startFallbackTimer()
 }
 
 // Stop 停止账户监控
@@ -96,9 +83,6 @@ func (am *AccountManager) Stop() {
 	// 清理防抖动定时器
 	am.cleanupDebounceTimers()
 
-	// 停止兜底定时器
-	am.stopFallbackTimer()
-
 	am.stopChan <- true
 	logrus.Info("账户监控已停止")
 }
@@ -117,19 +101,15 @@ func (am *AccountManager) initializeData() {
 
 	logrus.Info("开始初始化账户数据...")
 
-	// 主动获取初始余额数据
-	logrus.Info("正在获取初始余额数据...")
-	am.refreshBalances(false)
-
 	// 清除旧的持仓数据
 	logrus.Info("清除Redis中的旧持仓数据...")
 	if err := redis.GlobalRedisClient.ClearAllPositions(); err != nil {
 		logrus.Errorf("清除旧持仓数据失败: %v", err)
 	}
 
-	// 主动获取初始持仓数据
-	logrus.Info("正在获取初始持仓数据...")
-	am.refreshPositions(false)
+	// 主动获取初始账户数据
+	logrus.Info("正在获取初始账户数据...")
+	am.refreshBalances()
 
 	logrus.Info("账户数据初始化完成")
 }
@@ -190,165 +170,42 @@ func (am *AccountManager) cleanupDebounceTimers() {
 	am.debounceMutex.Lock()
 	defer am.debounceMutex.Unlock()
 
-	// 停止并清理余额定时器
-	if am.balanceDebounceTimer != nil {
-		am.balanceDebounceTimer.Stop()
-		am.balanceDebounceTimer = nil
-		logrus.Debug("余额防抖动定时器已清理")
-	}
-
-	// 停止并清理仓位定时器
-	if am.positionDebounceTimer != nil {
-		am.positionDebounceTimer.Stop()
-		am.positionDebounceTimer = nil
-		logrus.Debug("仓位防抖动定时器已清理")
+	// 停止并清理账户数据防抖动定时器
+	if am.accountDataDebounceTimer != nil {
+		am.accountDataDebounceTimer.Stop()
+		am.accountDataDebounceTimer = nil
+		logrus.Debug("账户数据防抖动定时器已清理")
 	}
 }
 
-// startFallbackTimer 启动兜底定时器
-func (am *AccountManager) startFallbackTimer() {
-	am.fallbackMutex.Lock()
-	defer am.fallbackMutex.Unlock()
-
-	// 如果AccountManager已停止，不创建新的定时器
-	if !am.running {
-		logrus.Debug("AccountManager已停止，跳过兜底定时器启动")
-		return
-	}
-
-	// 如果已有定时器，停止它
-	if am.fallbackTimer != nil {
-		am.fallbackTimer.Stop()
-	}
-
-	// 创建新的兜底定时器，30分钟后执行
-	am.fallbackTimer = time.AfterFunc(am.fallbackInterval, func() {
-		// 检查AccountManager是否还在运行
-		if !am.running {
-			logrus.Debug("AccountManager已停止，跳过兜底数据同步")
-			return
-		}
-
-		logrus.Info("兜底定时器触发，开始执行数据同步...")
-
-		// 执行余额和仓位的同步（定时器触发，跳过TG通知）
-		am.refreshBalances(true)
-		am.refreshPositions(true)
-
-		// 重新启动定时器
-		if am.running {
-			go am.startFallbackTimer()
-		}
-	})
-
-	logrus.Infof("兜底定时器已启动，将在 %v 后执行数据同步", am.fallbackInterval)
-}
-
-// resetFallbackTimer 重置兜底定时器
-func (am *AccountManager) resetFallbackTimer() {
-	am.fallbackMutex.Lock()
-	defer am.fallbackMutex.Unlock()
-
-	// 如果AccountManager已停止，不创建新的定时器
-	if !am.running {
-		logrus.Debug("AccountManager已停止，跳过兜底定时器重置")
-		return
-	}
-
-	// 如果已有定时器，停止它
-	if am.fallbackTimer != nil {
-		am.fallbackTimer.Stop()
-	}
-
-	// 创建新的兜底定时器，重新开始30分钟倒计时
-	am.fallbackTimer = time.AfterFunc(am.fallbackInterval, func() {
-		// 检查AccountManager是否还在运行
-		if !am.running {
-			logrus.Debug("AccountManager已停止，跳过兜底数据同步")
-			return
-		}
-
-		logrus.Info("兜底定时器触发，开始执行数据同步...")
-
-		// 执行余额和仓位的同步（定时器触发，跳过TG通知）
-		am.refreshBalances(true)
-		am.refreshPositions(true)
-
-		// 重新启动定时器（如果AccountManager还在运行）
-		if am.running {
-			go am.startFallbackTimer()
-		}
-	})
-
-	logrus.Debug("兜底定时器已重置，重新开始30分钟倒计时")
-}
-
-// stopFallbackTimer 停止兜底定时器
-func (am *AccountManager) stopFallbackTimer() {
-	am.fallbackMutex.Lock()
-	defer am.fallbackMutex.Unlock()
-
-	// 停止并清理兜底定时器
-	if am.fallbackTimer != nil {
-		am.fallbackTimer.Stop()
-		am.fallbackTimer = nil
-		logrus.Debug("兜底定时器已停止")
-	}
-}
-
-// debounceBalanceUpdate 防抖动余额更新，延迟1秒执行
-func (am *AccountManager) debounceBalanceUpdate() {
+// debounceAccountDataUpdate 防抖动账户数据更新
+func (am *AccountManager) debounceAccountDataUpdate() {
 	am.debounceMutex.Lock()
 	defer am.debounceMutex.Unlock()
 
 	// 如果AccountManager已停止，不创建新的定时器
 	if !am.running {
-		logrus.Debug("AccountManager已停止，跳过余额防抖动")
+		logrus.Debug("AccountManager已停止，跳过账户数据防抖动")
 		return
 	}
 
-	// 如果已有定时器，停止它
-	if am.balanceDebounceTimer != nil {
-		am.balanceDebounceTimer.Stop()
+	// 停止已有的账户数据定时器
+	if am.accountDataDebounceTimer != nil {
+		am.accountDataDebounceTimer.Stop()
+		am.accountDataDebounceTimer = nil
 	}
 
-	// 创建新的定时器，1秒后执行
-	am.balanceDebounceTimer = time.AfterFunc(1*time.Second, func() {
+	// 创建新的统一定时器，1秒后同时执行余额和仓位刷新
+	am.accountDataDebounceTimer = time.AfterFunc(1*time.Second, func() {
 		// 检查AccountManager是否还在运行
 		if !am.running {
-			logrus.Debug("AccountManager已停止，跳过余额刷新")
+			logrus.Debug("AccountManager已停止，跳过账户数据刷新")
 			return
 		}
-		logrus.Info("防抖动延迟后执行余额刷新")
-		am.refreshBalances(false)
-	})
-}
+		logrus.Info("防抖动延迟后执行账户数据刷新")
 
-// debouncePositionUpdate 防抖动仓位更新，延迟1秒执行
-func (am *AccountManager) debouncePositionUpdate() {
-	am.debounceMutex.Lock()
-	defer am.debounceMutex.Unlock()
-
-	// 如果AccountManager已停止，不创建新的定时器
-	if !am.running {
-		logrus.Debug("AccountManager已停止，跳过仓位防抖动")
-		return
-	}
-
-	// 如果已有定时器，停止它
-	if am.positionDebounceTimer != nil {
-		am.positionDebounceTimer.Stop()
-	}
-
-	// 创建新的定时器，1秒后执行
-	am.positionDebounceTimer = time.AfterFunc(1*time.Second, func() {
-		// 检查AccountManager是否还在运行
-		if !am.running {
-			logrus.Debug("AccountManager已停止，跳过仓位刷新")
-			return
-		}
-		logrus.Info("防抖动延迟后执行仓位刷新")
-		am.refreshPositions(false)
+		// 刷新余额数据
+		am.refreshBalances()
 	})
 }
 
@@ -358,19 +215,14 @@ func (am *AccountManager) handleAccountUpdate(accountUpdate *types.WatchAccountU
 		accountUpdate.EventType, len(accountUpdate.Balances), len(accountUpdate.Positions), accountUpdate.EventTime)
 
 	if len(accountUpdate.Balances) > 0 {
-		logrus.Infof("检测到余额变化，启动防抖动余额更新，余额变化数量: %d", len(accountUpdate.Balances))
-		go am.debounceBalanceUpdate()
-	}
-
-	if len(accountUpdate.Positions) > 0 {
-		logrus.Infof("检测到持仓变化，启动防抖动持仓更新，持仓变化数量: %d", len(accountUpdate.Positions))
-		go am.debouncePositionUpdate()
+		logrus.Infof("检测到余额变化，启动防抖动更新，余额变化数量: %d", len(accountUpdate.Balances))
+		go am.debounceAccountDataUpdate()
 	}
 	return nil
 }
 
 // refreshBalances 刷新余额数据并缓存到Redis
-func (am *AccountManager) refreshBalances(skipTelegram bool) {
+func (am *AccountManager) refreshBalances() {
 	if am.binanceClient == nil {
 		logrus.Error("Binance客户端未初始化，无法刷新余额")
 		return
@@ -386,20 +238,14 @@ func (am *AccountManager) refreshBalances(skipTelegram bool) {
 	}
 
 	// 获取持仓数据以计算总盈亏
-	var totalPnl float64 = 0.0
-	var marginUsed float64 = 0.0
-	var positionCount int = 0
+	var totalPnl = 0.0
+	var marginUsed = 0.0
+	var positionCount = 0
 
 	positions, err := am.binanceClient.FetchPositions(context.Background(), nil, nil)
 	if err == nil {
-		for i := range positions {
-			position := positions[i]
-			if position.Size != 0 { // 只计算有持仓的
-				totalPnl += position.UnrealizedPnl
-				marginUsed += position.InitialMargin
-				positionCount++
-			}
-		}
+		// 处理持仓数据
+		am.processAndCachePositions(positions, &totalPnl, &marginUsed, &positionCount)
 	} else {
 		logrus.Warnf("获取持仓数据失败，使用缓存数据: %v", err)
 		// 尝试从缓存获取持仓盈亏
@@ -438,7 +284,7 @@ func (am *AccountManager) refreshBalances(skipTelegram bool) {
 
 	// 缓存到Redis
 	if redis.GlobalRedisClient != nil {
-		// 缓存余额汇总（实时缓存，永不过期）
+		// 缓存余额汇总
 		if err := redis.GlobalRedisClient.SetBalancesRealtime(balanceSummary); err != nil {
 			logrus.Errorf("缓存余额汇总失败: %v", err)
 		} else {
@@ -452,10 +298,10 @@ func (am *AccountManager) refreshBalances(skipTelegram bool) {
 		}
 	}
 
-	// 发送Telegram通知（根据skipTelegram参数决定是否发送）
-	if !skipTelegram && telegram.GlobalTelegramClient != nil {
-		message := fmt.Sprintf("余额 %.2f USDT | 可用 %.2f | 持仓 %d",
-			balanceSummary["net_value"], balanceSummary["usdt_free"], positionCount)
+	// 发送合并的Telegram通知
+	if telegram.GlobalTelegramClient != nil {
+		message := fmt.Sprintf("余额 %.2f USDT | 可用 %.2f | 持仓 %d | PNL %.4f",
+			balanceSummary["net_value"], balanceSummary["usdt_free"], positionCount, totalPnl)
 		telegram.GlobalTelegramClient.SendMessage(message)
 	}
 
@@ -476,38 +322,30 @@ func (am *AccountManager) refreshBalances(skipTelegram bool) {
 	})
 
 	logrus.Info("余额数据刷新完成")
-
-	// 重置兜底定时器
-	go am.resetFallbackTimer()
 }
 
-// refreshPositions 刷新持仓数据并缓存到Redis
-func (am *AccountManager) refreshPositions(skipTelegram bool) {
-	if am.binanceClient == nil {
-		logrus.Error("Binance客户端未初始化，无法刷新持仓")
-		return
-	}
-
-	logrus.Info("开始刷新持仓数据...")
-
-	// 从交易所获取最新持仓
-	positions, err := am.binanceClient.FetchPositions(context.Background(), nil, nil)
-	if err != nil {
-		logrus.Errorf("获取持仓信息失败: %v", err)
-		return
-	}
-
+// processAndCachePositions 处理并缓存持仓数据
+func (am *AccountManager) processAndCachePositions(positions []*types.Position, totalPnl, marginUsed *float64, positionCount *int) {
 	// 转成统一的model positions
 	mps := make([]*models.Position, 0, len(positions))
 
-	// 逐个存储持仓信息
+	// 逐个处理持仓信息
 	for i := range positions {
 		position := positions[i]
+
+		// 累计计算余额相关数据
+		if position.Size != 0 { // 只计算有持仓的
+			*totalPnl += position.UnrealizedPnl
+			*marginUsed += position.InitialMargin
+			*positionCount++
+		}
+
 		// 转换保证金模式格式
 		marginMode := types.MarginModeCross
 		if position.MarginType == types.MarginModeIsolated {
 			marginMode = types.MarginModeIsolated
 		}
+
 		positionModel := &models.Position{
 			Symbol:            position.Symbol,
 			Side:              strings.ToUpper(position.Side),
@@ -523,6 +361,7 @@ func (am *AccountManager) refreshPositions(skipTelegram bool) {
 			Notional:          position.NotionalValue,
 			UpdatedAt:         time.UnixMilli(position.Timestamp),
 		}
+
 		mps = append(mps, positionModel)
 	}
 
@@ -539,7 +378,7 @@ func (am *AccountManager) refreshPositions(skipTelegram bool) {
 		// 逐个存储持仓信息
 		for i := range mps {
 			modelPosition := mps[i]
-			if err = redis.GlobalRedisClient.SetPosition(modelPosition); err != nil {
+			if err := redis.GlobalRedisClient.SetPosition(modelPosition); err != nil {
 				logrus.Errorf("存储持仓信息失败 %s: %v", modelPosition.Symbol, err)
 			}
 		}
@@ -548,38 +387,28 @@ func (am *AccountManager) refreshPositions(skipTelegram bool) {
 	}
 
 	// 计算总盈亏
-	totalPnl := 0.0
+	totalPnlForBroadcast := 0.0
 	for i := range mps {
 		modelPosition := mps[i]
-		totalPnl += modelPosition.UnrealizedPnl
-	}
-
-	// 发送Telegram通知
-	if !skipTelegram && telegram.GlobalTelegramClient != nil {
-		message := fmt.Sprintf("持仓 %d | PNL %.4f",
-			len(mps), totalPnl)
-		telegram.GlobalTelegramClient.SendMessage(message)
+		totalPnlForBroadcast += modelPosition.UnrealizedPnl
 	}
 
 	// 通过WebSocket广播持仓更新
-	logrus.Infof("准备广播持仓更新，持仓数量: %d, 总盈亏: %.4f USDT", len(mps), totalPnl)
-	go am.broadcastAccountUpdate(mps, totalPnl)
+	logrus.Infof("准备广播持仓更新，持仓数量: %d, 总盈亏: %.4f USDT", len(mps), totalPnlForBroadcast)
+	go am.broadcastAccountUpdate(mps, totalPnlForBroadcast)
 
 	// 广播持仓更新事件
 	go am.broadcastEvent("position_update", map[string]interface{}{
 		"type":    "position_update",
-		"message": fmt.Sprintf("持仓已更新: %d 个持仓，总盈亏 %.4f USDT", len(mps), totalPnl),
+		"message": fmt.Sprintf("持仓已更新: %d 个持仓，总盈亏 %.4f USDT", len(mps), totalPnlForBroadcast),
 		"data": map[string]interface{}{
 			"position_count": len(mps),
-			"total_pnl":      totalPnl,
+			"total_pnl":      totalPnlForBroadcast,
 			"positions":      mps,
 		},
 	})
 
-	logrus.Info("持仓数据刷新完成")
-
-	// 重置兜底定时器
-	go am.resetFallbackTimer()
+	logrus.Infof("持仓数据处理完成，共 %d 个持仓", len(mps))
 }
 
 // ensurePositionCoinsSelected 确保有仓位的币种被自动选中

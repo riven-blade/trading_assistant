@@ -71,15 +71,9 @@ func (c *CoinController) SelectCoin(ctx *gin.Context) {
 		logrus.Infof("币种 %s 已取消选中", req.Symbol)
 	}
 
-	// 自动管理markPrice订阅状态
-	subscriptionSynced := false
+	// 刷新价格管理器的选中币种缓存
 	if c.marketManager != nil {
-		if err := c.marketManager.SyncPriceSubscriptions(); err != nil {
-			logrus.Errorf("同步markPrice订阅状态失败: %v", err)
-		} else {
-			subscriptionSynced = true
-			logrus.Debugf("markPrice订阅状态已自动同步")
-		}
+		c.marketManager.RefreshSelectedCoinsCache()
 	}
 
 	// 获取选择状态用于响应
@@ -89,24 +83,20 @@ func (c *CoinController) SelectCoin(ctx *gin.Context) {
 	response := gin.H{
 		"message": "币种选择状态更新成功",
 		"data": gin.H{
-			"coin":                coin,
-			"selection":           selection,
-			"is_selected":         req.IsSelected,
-			"subscription_synced": subscriptionSynced,
+			"coin":        coin,
+			"selection":   selection,
+			"is_selected": req.IsSelected,
 		},
 	}
 
-	// 如果启用了OrderBook管理器，返回订阅状态信息
+	// 如果启用了价格管理器，返回全局订阅状态信息
 	if c.marketManager != nil {
-		orderBookStatus := c.marketManager.GetPriceSubscriptionStatus()
-		response["orderbook_subscriptions"] = gin.H{
-			"total_count": len(orderBookStatus),
-			"symbol_status": func() string {
-				if sub, exists := orderBookStatus[req.Symbol]; exists {
-					return sub.Status
-				}
-				return "not_subscribed"
-			}(),
+		priceStatus := c.marketManager.GetPriceSubscriptionStatus()
+		response["price_subscriptions"] = gin.H{
+			"mode":        priceStatus["mode"],
+			"running":     priceStatus["running"],
+			"subscribed":  priceStatus["subscribed"],
+			"stream_name": priceStatus["stream_name"],
 		}
 	}
 

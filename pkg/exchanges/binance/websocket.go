@@ -12,27 +12,31 @@ import (
 	"trading_assistant/pkg/exchanges/types"
 
 	"trading_assistant/pkg/exchanges"
+
+	"github.com/sirupsen/logrus"
 )
 
 // WebSocketConfig WebSocket配置
 type WebSocketConfig struct {
-	MaxConnections       int           `json:"maxConnections"`       // 最大连接数
-	StreamsPerConnection int           `json:"streamsPerConnection"` // 每个连接的最大流数
-	MaxReconnectAttempts int           `json:"maxReconnectAttempts"` // 最大重连次数
-	BatchSize            int           `json:"batchSize"`            // 批量大小
-	BatchInterval        time.Duration `json:"batchInterval"`        // 批量间隔
-	HealthCheckInterval  time.Duration `json:"healthCheckInterval"`  // 健康检查间隔
+	MaxConnections         int           `json:"maxConnections"`         // 最大连接数
+	StreamsPerConnection   int           `json:"streamsPerConnection"`   // 每个连接的最大流数
+	MaxReconnectAttempts   int           `json:"maxReconnectAttempts"`   // 最大重连次数
+	BatchSize              int           `json:"batchSize"`              // 批量大小
+	BatchInterval          time.Duration `json:"batchInterval"`          // 批量间隔
+	HealthCheckInterval    time.Duration `json:"healthCheckInterval"`    // 健康检查间隔
+	DataProcessConcurrency int           `json:"dataProcessConcurrency"` // 数据处理并发数
 }
 
 // DefaultWebSocketConfig 默认配置
 func DefaultWebSocketConfig() *WebSocketConfig {
 	return &WebSocketConfig{
-		MaxConnections:       10,
-		StreamsPerConnection: 100, // 降低单连接负载，强制分散
-		MaxReconnectAttempts: 5,
-		BatchSize:            50,                     // 减小批量大小，更频繁处理
-		BatchInterval:        100 * time.Millisecond, // 增加间隔，减少压力
-		HealthCheckInterval:  30 * time.Second,
+		MaxConnections:         10,
+		StreamsPerConnection:   100, // 降低单连接负载，强制分散
+		MaxReconnectAttempts:   5,
+		BatchSize:              50,                     // 减小批量大小，更频繁处理
+		BatchInterval:          100 * time.Millisecond, // 增加间隔，减少压力
+		HealthCheckInterval:    30 * time.Second,
+		DataProcessConcurrency: 10, // 默认并发处理10个币种
 	}
 }
 
@@ -247,10 +251,36 @@ func (ws *WebSocket) handleMessage(data []byte, conn *WSConnection) error {
 	atomic.AddInt64(&ws.msgCount, 1)
 	atomic.StoreInt64(&ws.lastMsgTime, time.Now().UnixMilli())
 
+	// 检查消息格式：数组还是对象
+	if len(data) > 0 && data[0] == '[' {
+		// 数组格式的消息
+		return ws.handleArrayMessage(data)
+	} else {
+		// 对象格式的消息
+		return ws.handleObjectMessage(data)
+	}
+}
+
+// handleArrayMessage 处理数组格式的消息
+func (ws *WebSocket) handleArrayMessage(data []byte) error {
+	var arrData []interface{}
+	if err := json.Unmarshal(data, &arrData); err != nil {
+		atomic.AddInt64(&ws.errorCount, 1)
+		logrus.Errorf("解析数组格式消息失败, 数据长度: %d, 错误: %v", len(data), err)
+		return fmt.Errorf("parse array message failed: %w", err)
+	}
+
+	// 目前只有 !markPrice@arr 使用数组格式，直接处理为标记价格数组
+	return ws.handleMarkPriceArray(arrData)
+}
+
+// handleObjectMessage 处理对象格式的消息
+func (ws *WebSocket) handleObjectMessage(data []byte) error {
 	var msg map[string]interface{}
 	if err := json.Unmarshal(data, &msg); err != nil {
 		atomic.AddInt64(&ws.errorCount, 1)
-		return err
+		logrus.Errorf("解析对象格式消息失败, 数据长度: %d, 错误: %v", len(data), err)
+		return fmt.Errorf("parse object message failed: %w", err)
 	}
 
 	// 处理订阅确认
@@ -266,6 +296,88 @@ func (ws *WebSocket) handleMessage(data []byte, conn *WSConnection) error {
 
 	// 解析并发布数据
 	return ws.parseAndPublish(msg)
+}
+
+// handleMarkPriceArray 处理标记价格数组数据
+// 用于处理 Binance !markPrice@arr 全局标记价格流，这个流返回所有交易对的标记价格数据
+func (ws *WebSocket) handleMarkPriceArray(arrData []interface{}) error {
+	if ws.publishFunc == nil {
+		return nil
+	}
+
+	// 使用带缓冲的channel控制并发数，避免过载
+	maxConcurrency := ws.config.DataProcessConcurrency
+	if maxConcurrency <= 0 {
+		maxConcurrency = 10 // 默认值
+	}
+	semaphore := make(chan struct{}, maxConcurrency)
+	var wg sync.WaitGroup
+
+	// 预处理：收集有效的价格数据，避免创建不必要的goroutine
+	var validPriceData []map[string]interface{}
+	for i := range arrData {
+		if priceObj, ok := arrData[i].(map[string]interface{}); ok {
+			// 快速检查symbol是否存在，避免完整解析无效数据
+			if symbol, exists := priceObj[FieldSymbol]; exists && symbol != "" {
+				validPriceData = append(validPriceData, priceObj)
+			}
+		}
+	}
+
+	// 并发处理有效的价格数据
+	for i := range validPriceData {
+		priceObj := validPriceData[i]
+		wg.Add(1)
+		go func(priceData map[string]interface{}) {
+			defer wg.Done()
+
+			// 获取信号量，限制并发数
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			// 解析单个标记价格数据
+			markPrice := ws.parseMarkPriceSingle(priceData)
+			if markPrice == nil {
+				return // 跳过无效数据
+			}
+
+			// 构造并发布数据到订阅者
+			if err := ws.publishWithMetaData(markPrice.Symbol, "markPrice", "!markPrice@arr", markPrice.TimeStamp, markPrice); err != nil {
+				logrus.Errorf("发布标记价格数据失败 %s: %v", markPrice.Symbol, err)
+			}
+		}(priceObj)
+	}
+
+	// 等待所有goroutine完成
+	start := time.Now()
+	wg.Wait()
+	duration := time.Since(start)
+
+	// 性能监控日志（每1000次记录一次）
+	if atomic.AddInt64(&ws.msgCount, 1)%1000 == 0 {
+		logrus.Debugf("批量处理 %d 个币种数据，耗时: %v, 并发数: %d",
+			len(validPriceData), duration, maxConcurrency)
+	}
+
+	return nil
+}
+
+// publishWithMetaData 辅助方法：构造MetaData并发布数据
+func (ws *WebSocket) publishWithMetaData(marketID, dataType, stream string, timestamp int64, data interface{}) error {
+	if ws.publishFunc == nil {
+		return nil
+	}
+
+	metaData := types.MetaData{
+		Exchange:  "binance",
+		Market:    ws.getMarketType(),
+		MarketID:  marketID,
+		DataType:  dataType,
+		Stream:    stream,
+		Timestamp: timestamp,
+	}
+
+	return ws.publishFunc(metaData, data)
 }
 
 // parseAndPublish 解析消息并发布数据
@@ -319,26 +431,51 @@ func (ws *WebSocket) parseAndPublish(msg map[string]interface{}) error {
 		return nil
 	}
 
-	// 构造MetaData
-	metaData := types.MetaData{
-		Exchange:  "binance",
-		Market:    ws.getMarketType(),
-		MarketID:  symbol,
-		DataType:  ws.convertEventTypeToDataType(eventType),
-		Stream:    streamName,
-		Timestamp: ws.extractTimestamp(msg),
-	}
+	// 构造并发布数据
+	timestamp := ws.extractTimestamp(msg)
+	dataType := ws.convertEventTypeToDataType(eventType)
 
 	if eventType == EventTypeKline && streamName != "" {
-		metaData.Timeframe = ws.extractTimeframe(streamName)
+		// K线数据需要特殊处理Timeframe
+		metaData := types.MetaData{
+			Exchange:  "binance",
+			Market:    ws.getMarketType(),
+			MarketID:  symbol,
+			DataType:  dataType,
+			Stream:    streamName,
+			Timestamp: timestamp,
+			Timeframe: ws.extractTimeframe(streamName),
+		}
+		return ws.publishFunc(metaData, parsedData)
 	}
 
-	// 调用发布函数
-	return ws.publishFunc(metaData, parsedData)
+	return ws.publishWithMetaData(symbol, dataType, streamName, timestamp, parsedData)
+}
+
+// parseMarkPriceSingle 解析单个标记价格对象
+func (ws *WebSocket) parseMarkPriceSingle(priceObj map[string]interface{}) *types.WatchMarkPrice {
+	symbol := strings.ToUpper(ws.SafeString(priceObj, FieldSymbol, ""))
+	if symbol == "" {
+		return nil
+	}
+
+	return &types.WatchMarkPrice{
+		Symbol:      symbol,
+		TimeStamp:   ws.SafeInt(priceObj, FieldEventTime, time.Now().UnixMilli()),
+		MarkPrice:   ws.SafeFloat(priceObj, FieldMarkPrice, 0),
+		IndexPrice:  ws.SafeFloat(priceObj, FieldIndexPrice, 0),
+		FundingRate: ws.SafeFloat(priceObj, FieldFundingRate, 0),
+		FundingTime: ws.SafeInt(priceObj, FieldFundingTime, 0),
+	}
 }
 
 // parseStreamInfo 解析流信息
 func (ws *WebSocket) parseStreamInfo(streamName string) (eventType, symbol string) {
+	// 处理标记价格数组流
+	if streamName == "!markPrice@arr" {
+		return EventTypeMarkPrice, "ALL" // 使用特殊symbol标识所有币种
+	}
+
 	parts := strings.Split(streamName, "@")
 	if len(parts) >= 2 {
 		symbol = strings.ToUpper(parts[0])
@@ -443,19 +580,12 @@ func (ws *WebSocket) parseBookTicker(msg map[string]interface{}) *types.WatchBoo
 
 // parseMarkPrice 解析标记价格
 func (ws *WebSocket) parseMarkPrice(msg map[string]interface{}) *types.WatchMarkPrice {
-	symbol := strings.ToUpper(ws.SafeString(msg, FieldSymbol, ""))
-	if symbol == "" {
-		return nil
+	markPrice := ws.parseMarkPriceSingle(msg)
+	if markPrice != nil {
+		// 对于单个标记价格流，使用extractTimestamp而不是FieldEventTime
+		markPrice.TimeStamp = ws.extractTimestamp(msg)
 	}
-
-	return &types.WatchMarkPrice{
-		Symbol:      symbol,
-		TimeStamp:   ws.extractTimestamp(msg),
-		MarkPrice:   ws.SafeFloat(msg, FieldMarkPrice, 0),
-		IndexPrice:  ws.SafeFloat(msg, FieldIndexPrice, 0),
-		FundingRate: ws.SafeFloat(msg, FieldFundingRate, 0),
-		FundingTime: ws.SafeInt(msg, FieldFundingTime, 0),
-	}
+	return markPrice
 }
 
 // ========== 用户数据流解析方法 ==========
@@ -590,17 +720,6 @@ func (ws *WebSocket) convertEventTypeToDataType(eventType string) string {
 
 func (ws *WebSocket) getMarketType() string {
 	return ws.exchange.marketType
-}
-
-// isUserDataEvent 判断是否为用户数据流事件
-func (ws *WebSocket) isUserDataEvent(eventType string) bool {
-	switch eventType {
-	case EventTypeAccountUpdate, EventTypeOrderTradeUpdate, EventTypeBalanceUpdate,
-		EventTypeExecutionReport, EventTypeOutboundAccountPosition:
-		return true
-	default:
-		return false
-	}
 }
 
 func (ws *WebSocket) extractTimeframe(streamName string) string {

@@ -2,8 +2,6 @@ package websocket
 
 import (
 	"sync"
-
-	"github.com/sirupsen/logrus"
 )
 
 // GlobalWebSocketManager 全局WebSocket管理器实例
@@ -15,7 +13,6 @@ func InitializeGlobalWebSocketManager() {
 	once.Do(func() {
 		GlobalWebSocketManager = NewWebSocketManager()
 		GlobalWebSocketManager.Start()
-		logrus.Info("全局WebSocket管理器已初始化")
 	})
 }
 

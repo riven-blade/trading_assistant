@@ -34,7 +34,6 @@ func NewWebSocketManager() *WebSocketManager {
 // Start 启动WebSocket管理器
 func (wsm *WebSocketManager) Start() {
 	go wsm.hub.Run()
-	logrus.Info("WebSocket管理器已启动")
 }
 
 // HandleWebSocket 处理WebSocket连接

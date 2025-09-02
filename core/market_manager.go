@@ -25,48 +25,43 @@ func NewMarketManager(binanceClient *binance.Binance) *MarketManager {
 	}
 }
 
-// StartPriceSubscriptions 启动选中币种的markPrice订阅
+// StartPriceSubscriptions 启动全局markPrice订阅
 func (mm *MarketManager) StartPriceSubscriptions() error {
-	logrus.Info("开始启动选中币种的markPrice订阅...")
+	logrus.Info("开始启动全局markPrice订阅...")
 
-	// 启动价格管理器
+	// 启动价格管理器（自动订阅 !markPrice@arr 流）
 	if err := mm.priceManager.Start(); err != nil {
 		return fmt.Errorf("启动价格管理器失败: %v", err)
-	}
-
-	// 同步订阅状态
-	if err := mm.priceManager.SyncSubscriptions(); err != nil {
-		return fmt.Errorf("同步markPrice订阅状态失败: %v", err)
 	}
 
 	logrus.Info("markPrice订阅启动完成")
 	return nil
 }
 
-// StopPriceSubscriptions 停止markPrice订阅
+// StopPriceSubscriptions 停止全局markPrice订阅
 func (mm *MarketManager) StopPriceSubscriptions() {
 	if mm.priceManager != nil {
 		mm.priceManager.Stop()
-		logrus.Info("价格订阅已停止")
+		logrus.Info("全局价格订阅已停止")
 	}
-}
-
-// SyncPriceSubscriptions 同步markPrice订阅状态
-func (mm *MarketManager) SyncPriceSubscriptions() error {
-	if mm.priceManager == nil || !mm.priceManager.IsRunning() {
-		return fmt.Errorf("价格管理器未运行")
-	}
-
-	return mm.priceManager.SyncSubscriptions()
 }
 
 // GetPriceSubscriptionStatus 获取价格订阅状态
-func (mm *MarketManager) GetPriceSubscriptionStatus() map[string]*PriceSubscription {
+func (mm *MarketManager) GetPriceSubscriptionStatus() map[string]interface{} {
 	if mm.priceManager == nil {
-		return make(map[string]*PriceSubscription)
+		return map[string]interface{}{
+			"error": "价格管理器未初始化",
+		}
 	}
 
-	return mm.priceManager.GetSubscriptionStatus()
+	return mm.priceManager.GetStatus()
+}
+
+// RefreshSelectedCoinsCache 刷新价格管理器的选中币种缓存
+func (mm *MarketManager) RefreshSelectedCoinsCache() {
+	if mm.priceManager != nil {
+		mm.priceManager.RefreshSelectedCoinsCache()
+	}
 }
 
 // SyncMarketAndPriceData 同步市场数据和价格数据

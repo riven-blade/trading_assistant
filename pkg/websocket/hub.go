@@ -111,7 +111,6 @@ func NewHub() *Hub {
 
 // Run 启动Hub
 func (h *Hub) Run() {
-	logrus.Info("WebSocket Hub启动")
 	for {
 		select {
 		case client := <-h.register:
@@ -222,7 +221,8 @@ func (h *Hub) BroadcastToSubscribers(dataType string, data interface{}) {
 
 	// 发送给所有订阅者
 	successCount := 0
-	for _, client := range clientList {
+	for i := range clientList {
+		client := clientList[i]
 		select {
 		case client.send <- messageData:
 			successCount++
