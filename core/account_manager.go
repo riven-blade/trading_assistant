@@ -309,18 +309,6 @@ func (am *AccountManager) refreshBalances() {
 	logrus.Infof("准备广播余额更新，净值: %.2f USDT", balanceSummary["net_value"])
 	go am.broadcastBalanceUpdate(balanceSummary)
 
-	// 广播余额更新事件
-	go am.broadcastEvent("balance_update", map[string]interface{}{
-		"type":    "balance_update",
-		"message": fmt.Sprintf("余额已更新: %.2f USDT", balanceSummary["net_value"]),
-		"data": map[string]interface{}{
-			"net_value": balanceSummary["net_value"],
-			"usdt_free": balanceSummary["usdt_free"],
-			"total_pnl": balanceSummary["total_pnl"],
-			"positions": positionCount,
-		},
-	})
-
 	logrus.Info("余额数据刷新完成")
 }
 

@@ -136,3 +136,9 @@ const (
 	StreamTemplateKline        = "%s@kline_%s"   // K线流模板 (symbol, interval)
 	StreamTemplateKlineDefault = "%s@kline_1m"   // 默认K线流模板
 )
+
+// WebSocket 全局流常量
+const (
+	StreamMarkPriceArray   = "!markPrice@arr"    // 全市场标记价格流（3秒更新）
+	StreamMarkPriceArray1s = "!markPrice@arr@1s" // 全市场标记价格流（1秒更新）
+)

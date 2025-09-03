@@ -101,7 +101,7 @@ func (pm *PriceManager) GetStatus() map[string]interface{} {
 		"subscription_time": pm.subscriptionTime.Unix(),
 		"last_data_time":    pm.lastDataTime.Unix(),
 		"price_count":       pm.priceCount,
-		"stream_name":       "!markPrice@arr",
+		"stream_name":       binance.StreamMarkPriceArray1s,
 		"mode":              "global_stream",
 	}
 }
@@ -112,7 +112,7 @@ func (pm *PriceManager) subscribe() error {
 		return nil
 	}
 
-	// 订阅全局标记价格流 (!markPrice@arr)
+	// 订阅标记价格流 (1秒更新)
 	err := pm.binanceClient.SubscribeToMarkPrice(pm.handlePriceData)
 	if err != nil {
 		return err

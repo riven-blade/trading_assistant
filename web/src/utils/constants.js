@@ -29,7 +29,7 @@ export const ACTIONS = {
     priceLabel: '止盈价格',
     quantityLabel: '止盈数量',
     priceRange: { min: -100, max: 100 },
-    priceBase: 'entry', // 基于开仓价格
+    priceBase: 'current', // 基于当前价格
     color: '#1890ff'
   },
   stop_loss: {
@@ -37,7 +37,7 @@ export const ACTIONS = {
     priceLabel: '止损价格',
     quantityLabel: '止损数量',
     priceRange: { min: -100, max: 100 },
-    priceBase: 'entry', // 基于开仓价格
+    priceBase: 'current', // 基于当前价格
     color: '#ff4d4f'
   }
 };

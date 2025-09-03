@@ -14,355 +14,696 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// UserDataStream 独立的用户数据流管理器
+// UserDataStream Binance 期货用户数据流 - 2025 最佳实现
 type UserDataStream struct {
+	// 核心组件
 	exchange *Binance
+	apiKey   string
+	secret   string
 
-	// 连接管理
-	connection *exchanges.WebSocketConnection
-	active     int32 // 0=未激活, 1=已激活
+	// 连接管理 - 使用原子指针避免锁竞争
+	conn      atomic.Pointer[exchanges.WebSocketConnection]
+	listenKey atomic.Pointer[string]
 
-	// 用户数据流相关
-	listenKey   string
-	publishFunc func(types.MetaData, interface{}) error
+	// 状态管理 - 原子操作确保线程安全
+	state     atomic.Int32 // 0=stopped, 1=connecting, 2=connected, 3=stopping
+	connected atomic.Bool
 
-	// 生命周期管理
-	ctx    context.Context
-	cancel context.CancelFunc
-	stopCh chan struct{}
-	wg     sync.WaitGroup // 等待协程结束
+	// 生命周期控制
+	ctx          context.Context
+	cancel       context.CancelFunc
+	wg           sync.WaitGroup
+	shutdownOnce sync.Once
 
-	// 重连处理
+	// 消息处理 - 性能优化
+	messageHandler func(types.MetaData, interface{}) error
+	msgPool        sync.Pool   // 消息对象复用池
+	msgChan        chan []byte // 消息通道，避免goroutine泄漏
+
+	// 保活机制 - 双重保活策略
+	listenKeyTicker   *time.Ticker
+	connectionChecker *time.Ticker
+	lastHeartbeat     atomic.Int64
+	lastMessage       atomic.Int64
+
+	// 重连机制 - 指数退避
+	reconnectEnabled  atomic.Bool
+	maxReconnectCount int32
+	baseDelay         time.Duration
+	maxDelay          time.Duration
+
+	// 错误处理
+	errorHandler     func(error)
 	reconnectHandler func(int, error)
+
+	// 性能统计
+	stats StreamStats
 }
 
-// NewUserDataStream 创建用户数据流管理器
-func NewUserDataStream(exchange *Binance) *UserDataStream {
-	ctx, cancel := context.WithCancel(context.Background())
+// StreamStats 性能统计
+type StreamStats struct {
+	StartTime       int64
+	ConnectedTime   atomic.Int64
+	MessageCount    atomic.Int64
+	ReconnectCount  atomic.Int32
+	LastMessageTime atomic.Int64
+	LastErrorTime   atomic.Int64
+}
 
-	return &UserDataStream{
-		exchange: exchange,
-		active:   0,
-		ctx:      ctx,
-		cancel:   cancel,
-		stopCh:   make(chan struct{}),
+// UserDataEvent 用户数据事件
+type UserDataEvent struct {
+	EventType string                 `json:"e"`
+	EventTime int64                  `json:"E"`
+	Data      map[string]interface{} `json:"-"`
+}
+
+// 状态常量
+const (
+	StateStopped    int32 = 0
+	StateConnecting int32 = 1
+	StateConnected  int32 = 2
+	StateStopping   int32 = 3
+)
+
+// 配置常量 - 根据官方文档优化
+const (
+	// Binance 官方推荐的保活间隔
+	ListenKeyKeepaliveInterval = 30 * time.Minute // listenKey 保活
+	ConnectionCheckInterval    = 10 * time.Second // 连接检查
+	MessageTimeout             = 5 * time.Minute  // 消息超时
+
+	// 重连配置
+	MaxReconnectCount  = 100
+	BaseReconnectDelay = 1 * time.Second
+	MaxReconnectDelay  = 30 * time.Second
+
+	// 性能配置
+	MessageBufferSize = 1000
+	MaxMessageSize    = 1024 * 1024 // 1MB
+)
+
+// NewUserDataStream 创建期货用户数据流
+func NewUserDataStream(exchange *Binance) *UserDataStream {
+	stream := &UserDataStream{
+		exchange:          exchange,
+		apiKey:            exchange.config.APIKey,
+		secret:            exchange.config.Secret,
+		maxReconnectCount: MaxReconnectCount,
+		baseDelay:         BaseReconnectDelay,
+		maxDelay:          MaxReconnectDelay,
+		stats: StreamStats{
+			StartTime: time.Now().Unix(),
+		},
 	}
+
+	// 初始化对象池
+	stream.msgPool = sync.Pool{
+		New: func() interface{} {
+			return &UserDataEvent{
+				Data: make(map[string]interface{}),
+			}
+		},
+	}
+
+	// 初始化消息通道，带缓冲避免阻塞
+	stream.msgChan = make(chan []byte, MessageBufferSize)
+
+	stream.reconnectEnabled.Store(true)
+	return stream
 }
 
 // Start 启动用户数据流
-func (uds *UserDataStream) Start(publishFunc func(types.MetaData, interface{}) error) error {
-	// 使用CAS操作确保只启动一次
-	if !atomic.CompareAndSwapInt32(&uds.active, 0, 1) {
-		logrus.Warn("用户数据流已经活跃，跳过重复启动")
-		return fmt.Errorf("user data stream already active")
+func (s *UserDataStream) Start(messageHandler func(types.MetaData, interface{}) error) error {
+	if !s.state.CompareAndSwap(StateStopped, StateConnecting) {
+		return fmt.Errorf("stream already running, state: %d", s.state.Load())
 	}
 
-	uds.publishFunc = publishFunc
-
-	// 创建listenKey
-	listenKey, err := uds.exchange.CreateListenKey()
-	if err != nil {
-		return fmt.Errorf("创建listenKey失败: %w", err)
+	if messageHandler == nil {
+		s.state.Store(StateStopped)
+		return fmt.Errorf("message handler cannot be nil")
 	}
 
-	uds.listenKey = listenKey
+	if s.apiKey == "" || s.secret == "" {
+		s.state.Store(StateStopped)
+		return fmt.Errorf("API credentials required")
+	}
 
-	// 启动连接循环
-	uds.wg.Add(1)
-	go uds.connectionLoop()
+	s.ctx, s.cancel = context.WithCancel(context.Background())
+	s.messageHandler = messageHandler
 
-	// 启动listenKey保活
-	uds.wg.Add(1)
-	go uds.keepaliveLoop()
+	// 重置统计
+	s.stats.ReconnectCount.Store(0)
+	s.stats.MessageCount.Store(0)
 
-	logrus.Info("用户数据流监听已启动，实时监控账户变化")
+	// 启动主循环
+	s.wg.Add(1)
+	go s.mainLoop()
+
+	// 启动消息处理器，避免goroutine泄漏
+	s.wg.Add(1)
+	go s.messageProcessor()
+
+	logrus.Info("Binance futures user data stream starting...")
 	return nil
 }
 
 // Stop 停止用户数据流
-func (uds *UserDataStream) Stop() error {
-	if atomic.LoadInt32(&uds.active) == 0 {
-		return nil
-	}
+func (s *UserDataStream) Stop() error {
+	s.shutdownOnce.Do(func() {
+		currentState := s.state.Load()
+		if currentState == StateStopped || currentState == StateStopping {
+			return
+		}
 
-	atomic.StoreInt32(&uds.active, 0)
+		s.state.Store(StateStopping)
+		logrus.Info("Stopping Binance futures user data stream...")
 
-	// 停止所有协程
-	close(uds.stopCh)
-	uds.cancel()
-	uds.wg.Wait() // 等待所有协程结束
+		// 禁用重连
+		s.reconnectEnabled.Store(false)
 
-	// 关闭连接
-	if uds.connection != nil {
-		uds.connection.Close()
-		uds.connection = nil
-	}
+		// 取消上下文
+		if s.cancel != nil {
+			s.cancel()
+		}
 
-	// 关闭listenKey
-	if uds.listenKey != "" {
-		uds.exchange.CloseListenKey(uds.listenKey)
-		uds.listenKey = ""
-	}
+		// 停止定时器
+		s.stopTimers()
 
-	logrus.Info("用户数据流已停止")
+		// 等待退出或超时
+		done := make(chan struct{})
+		go func() {
+			s.wg.Wait()
+			close(done)
+		}()
+
+		select {
+		case <-done:
+			logrus.Info("Stream stopped gracefully")
+		case <-time.After(10 * time.Second):
+			logrus.Warn("Stop timeout, forcing close")
+		}
+
+		// 清理连接
+		s.closeConnection()
+
+		// 清理消息通道
+		s.drainMessageChannel()
+
+		s.state.Store(StateStopped)
+	})
+
 	return nil
 }
 
-// connectionLoop 连接循环
-func (uds *UserDataStream) connectionLoop() {
-	defer uds.wg.Done()
+// messageProcessor 专用消息处理器，避免goroutine泄漏
+func (s *UserDataStream) messageProcessor() {
+	defer s.wg.Done()
 
 	for {
 		select {
-		case <-uds.stopCh:
+		case <-s.ctx.Done():
+			return
+		case data := <-s.msgChan:
+			s.handleMessage(data)
+		}
+	}
+}
+
+// mainLoop 主事件循环
+func (s *UserDataStream) mainLoop() {
+	defer s.wg.Done()
+	defer s.closeConnection()
+
+	for {
+		select {
+		case <-s.ctx.Done():
 			return
 		default:
-			// 清理旧连接
-			if uds.connection != nil {
-				uds.connection.Close()
-				uds.connection = nil
-			}
-
-			if err := uds.connect(); err != nil {
-				logrus.Errorf("用户数据流连接失败: %v", err)
-				select {
-				case <-uds.stopCh:
+			if err := s.connect(); err != nil {
+				if !s.reconnectEnabled.Load() {
+					logrus.Info("Reconnect disabled, exiting")
 					return
-				case <-time.After(5 * time.Second):
-					continue
 				}
+				s.handleReconnect(err)
+				continue
 			}
 
-			// 连接成功，等待连接关闭或停止信号
-			select {
-			case <-uds.stopCh:
+			// 连接成功，开始监听
+			s.state.Store(StateConnected)
+			s.connected.Store(true)
+			s.stats.ConnectedTime.Store(time.Now().Unix())
+			s.stats.ReconnectCount.Store(0) // 重置重连计数
+
+			// 启动保活机制
+			s.startKeepalive()
+
+			// 监听消息直到连接断开
+			s.listenMessages()
+
+			// 连接断开
+			s.connected.Store(false)
+			s.stopTimers()
+
+			if !s.reconnectEnabled.Load() {
 				return
-			case <-uds.ctx.Done():
-				logrus.Warn("用户数据流连接断开，准备重连")
-			case <-time.After(24 * time.Hour):
-				logrus.Info("用户数据流24小时重连")
-				if uds.connection != nil {
-					uds.connection.Close()
-				}
 			}
 		}
 	}
 }
 
 // connect 建立连接
-func (uds *UserDataStream) connect() error {
-	if uds.listenKey == "" {
-		return fmt.Errorf("listenKey为空")
-	}
-
-	// 构建URL
-	baseURL := uds.getWebSocketURL()
-	url := fmt.Sprintf("%s/%s", baseURL, uds.listenKey)
-
-	// 创建连接，禁用自动重连（我们自己管理重连）
-	conn, err := exchanges.NewWebSocketConnection(uds.ctx, url, 0)
+func (s *UserDataStream) connect() error {
+	listenKey, err := s.getValidListenKey()
 	if err != nil {
-		return fmt.Errorf("创建用户数据流连接失败: %w", err)
+		return fmt.Errorf("failed to get listen key: %w", err)
 	}
 
-	// 禁用客户端ping机制
-	conn.SetPingEnabled(false)
+	streamURL := fmt.Sprintf("wss://fstream.binance.com/ws/%s", listenKey)
+	conn, err := exchanges.NewWebSocketConnection(s.ctx, streamURL, MessageBufferSize)
+	if err != nil {
+		return fmt.Errorf("failed to create connection: %w", err)
+	}
 
-	// 设置消息处理器
-	conn.SetHandler(func(data []byte) error {
-		return uds.handleMessage(data)
-	})
+	conn.SetPingEnabled(true) // 启用底层 ping
+	conn.SetErrorHandler(s.handleConnectionError)
 
-	// 设置错误处理器
-	conn.SetErrorHandler(func(err error) {
-		logrus.Errorf("用户数据流连接错误: %v", err)
-	})
+	s.conn.Store(conn)
+	s.listenKey.Store(&listenKey)
 
-	uds.connection = conn
-	logrus.Info("用户数据流连接成功")
+	logrus.Infof("Connected to Binance futures user data stream")
 	return nil
 }
 
-// handleMessage 处理消息
-func (uds *UserDataStream) handleMessage(data []byte) error {
-	if uds.publishFunc == nil {
-		return nil
+// getValidListenKey 获取有效的 listenKey
+func (s *UserDataStream) getValidListenKey() (string, error) {
+	if s.exchange == nil {
+		return "", fmt.Errorf("exchange client is nil")
 	}
 
-	var msg map[string]interface{}
-	if err := json.Unmarshal(data, &msg); err != nil {
-		return err
+	// 尝试创建新的 listenKey
+	listenKey, err := s.exchange.CreateListenKey()
+	if err != nil {
+		return "", fmt.Errorf("create listen key failed: %w", err)
 	}
 
-	// 获取事件类型
-	eventType, _ := msg["e"].(string)
-	if eventType == "" {
-		return nil
+	if len(listenKey) < 8 {
+		return "", fmt.Errorf("invalid listen key received")
 	}
 
-	// 解析数据
-	var parsedData interface{}
-	switch eventType {
-	case "ACCOUNT_UPDATE":
-		parsedData = uds.parseAccountUpdate(msg)
-	case "ORDER_TRADE_UPDATE":
-		parsedData = uds.parseOrderUpdate(msg)
-	case "TRADE_LITE":
-		return nil // 跳过
-	default:
-		return nil
-	}
-
-	if parsedData == nil {
-		return nil
-	}
-
-	// 构造MetaData
-	metaData := types.MetaData{
-		Exchange:  "binance",
-		Market:    uds.getMarketType(),
-		DataType:  uds.convertEventTypeToDataType(eventType),
-		Timestamp: uds.extractTimestamp(msg),
-	}
-
-	return uds.publishFunc(metaData, parsedData)
+	logrus.Debugf("Created new listen key: %s...", listenKey[:8])
+	return listenKey, nil
 }
 
-// parseAccountUpdate 解析账户更新
-func (uds *UserDataStream) parseAccountUpdate(msg map[string]interface{}) interface{} {
-	result := &types.WatchAccountUpdate{
-		EventType: getString(msg, "e"),
-		EventTime: getInt64(msg, "E"),
-		Info:      msg,
+// startKeepalive 启动保活机制
+func (s *UserDataStream) startKeepalive() {
+	// ListenKey 保活
+	s.listenKeyTicker = time.NewTicker(ListenKeyKeepaliveInterval)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.listenKeyTicker.Stop()
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-s.listenKeyTicker.C:
+				s.keepaliveListenKey()
+			}
+		}
+	}()
+
+	// 连接健康检查 - 每10秒
+	s.connectionChecker = time.NewTicker(ConnectionCheckInterval)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.connectionChecker.Stop()
+
+		for {
+			select {
+			case <-s.ctx.Done():
+				return
+			case <-s.connectionChecker.C:
+				if !s.isConnectionHealthy() {
+					logrus.Warn("Connection unhealthy, triggering reconnect")
+					s.handleConnectionError(fmt.Errorf("connection health check failed"))
+					return
+				}
+			}
+		}
+	}()
+}
+
+// keepaliveListenKey 保持 listenKey 活跃
+func (s *UserDataStream) keepaliveListenKey() {
+	listenKeyPtr := s.listenKey.Load()
+	if listenKeyPtr == nil {
+		logrus.Warn("No listen key available for keepalive")
+		return
 	}
 
-	// 解析账户数据
-	if accountData, ok := msg["a"].(map[string]interface{}); ok {
+	listenKey := *listenKeyPtr
+	if listenKey == "" {
+		logrus.Warn("Empty listen key, skipping keepalive")
+		return
+	}
+
+	if s.exchange == nil {
+		logrus.Error("Exchange client is nil, cannot keepalive")
+		return
+	}
+
+	if err := s.exchange.KeepaliveListenKey(listenKey); err != nil {
+		logrus.Errorf("ListenKey keepalive failed: %v", err)
+		s.handleConnectionError(err)
+	} else {
+		s.lastHeartbeat.Store(time.Now().Unix())
+		logrus.Debug("ListenKey keepalive successful")
+	}
+}
+
+// listenMessages 监听消息
+func (s *UserDataStream) listenMessages() {
+	conn := s.conn.Load()
+	if conn == nil {
+		return
+	}
+
+	// 设置消息处理器
+	(*conn).SetHandler(func(data []byte) error {
+		// 使用通道避免创建大量goroutine
+		select {
+		case s.msgChan <- data:
+			// 消息发送成功
+		default:
+			// 通道满了，丢弃消息并记录警告
+			logrus.Warn("Message channel full, dropping message")
+		}
+		return nil
+	})
+
+	// 连接会自动处理消息循环，我们只需要等待连接断开
+	for s.connected.Load() {
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-time.After(time.Second):
+			// 检查连接状态
+			if !(*conn).IsConnected() {
+				logrus.Warn("Connection lost")
+				s.handleConnectionError(fmt.Errorf("connection lost"))
+				return
+			}
+		}
+	}
+}
+
+// handleMessage 处理消息 - 优化性能和安全
+func (s *UserDataStream) handleMessage(data []byte) {
+	// 消息有效性检查
+	if len(data) == 0 {
+		return
+	}
+
+	// 消息大小检查
+	if len(data) > MaxMessageSize {
+		logrus.Errorf("Message too large: %d bytes", len(data))
+		return
+	}
+
+	s.stats.MessageCount.Add(1)
+	s.stats.LastMessageTime.Store(time.Now().Unix())
+	s.lastMessage.Store(time.Now().Unix())
+
+	// 从对象池获取事件对象
+	event := s.msgPool.Get().(*UserDataEvent)
+	defer func() {
+		// 清理并返回对象池
+		event.EventType = ""
+		event.EventTime = 0
+		for k := range event.Data {
+			delete(event.Data, k)
+		}
+		s.msgPool.Put(event)
+	}()
+
+	// 解析消息 - 增加错误恢复
+	if err := json.Unmarshal(data, event); err != nil {
+		logrus.Errorf("Parse message failed: %v, data: %s", err, string(data[:min(len(data), 100)]))
+		return
+	}
+
+	// 解析完整数据
+	if err := json.Unmarshal(data, &event.Data); err != nil {
+		logrus.Errorf("Parse message data failed: %v", err)
+		return
+	}
+
+	// 验证事件类型
+	if event.EventType == "" {
+		logrus.Warn("Received message with empty event type")
+		return
+	}
+
+	// 处理特殊事件
+	if event.EventType == "listenKeyExpired" {
+		logrus.Warn("ListenKey expired, reconnecting...")
+		s.handleConnectionError(fmt.Errorf("listen key expired"))
+		return
+	}
+
+	// 构建并发送事件
+	s.processUserDataEvent(event)
+}
+
+// processUserDataEvent 处理用户数据事件 - 增加panic保护
+func (s *UserDataStream) processUserDataEvent(event *UserDataEvent) {
+	defer func() {
+		if r := recover(); r != nil {
+			logrus.Errorf("Panic in processUserDataEvent: %v", r)
+		}
+	}()
+
+	if s.messageHandler == nil {
+		return
+	}
+
+	var parsedEvent interface{}
+	var dataType string
+
+	switch event.EventType {
+	case "ACCOUNT_UPDATE":
+		parsedEvent = s.parseAccountUpdate(event.Data)
+		dataType = "account"
+	case "ORDER_TRADE_UPDATE":
+		parsedEvent = s.parseOrderUpdate(event.Data)
+		dataType = "order"
+	case "MARGIN_CALL":
+		parsedEvent = event.Data
+		dataType = "margin_call"
+	default:
+		logrus.Debugf("Unhandled event type: %s", event.EventType)
+		return
+	}
+
+	if parsedEvent == nil {
+		return
+	}
+
+	metaData := types.MetaData{
+		Exchange:  "binance",
+		Market:    "futures",
+		DataType:  dataType,
+		Timestamp: event.EventTime,
+	}
+
+	if err := s.messageHandler(metaData, parsedEvent); err != nil {
+		logrus.Errorf("Message handler error: %v", err)
+	}
+}
+
+// parseAccountUpdate 解析账户更新 - 性能优化版本
+func (s *UserDataStream) parseAccountUpdate(data map[string]interface{}) *types.WatchAccountUpdate {
+	result := &types.WatchAccountUpdate{
+		EventType: "ACCOUNT_UPDATE",
+		EventTime: s.getInt64(data, "E"),
+		Info:      data,
+	}
+
+	if accountData, ok := data["a"].(map[string]interface{}); ok {
+		// 预分配切片容量
 		if balances, ok := accountData["B"].([]interface{}); ok {
+			result.Balances = make([]types.WatchBalanceUpdate, 0, len(balances))
 			for _, item := range balances {
 				if balance, ok := item.(map[string]interface{}); ok {
 					result.Balances = append(result.Balances, types.WatchBalanceUpdate{
-						Asset:              getString(balance, "a"),
-						WalletBalance:      getFloat64(balance, "wb"),
-						CrossWalletBalance: getFloat64(balance, "cw"),
-						BalanceChange:      getFloat64(balance, "bc"),
+						Asset:              s.getString(balance, "a"),
+						WalletBalance:      s.getFloat64(balance, "wb"),
+						CrossWalletBalance: s.getFloat64(balance, "cw"),
+						BalanceChange:      s.getFloat64(balance, "bc"),
+					})
+				}
+			}
+		}
+
+		if positions, ok := accountData["P"].([]interface{}); ok {
+			result.Positions = make([]types.WatchPositionUpdate, 0, len(positions))
+			for _, item := range positions {
+				if position, ok := item.(map[string]interface{}); ok {
+					result.Positions = append(result.Positions, types.WatchPositionUpdate{
+						Symbol:                 s.getString(position, "s"),
+						PositionAmount:         s.getFloat64(position, "pa"),
+						EntryPrice:             s.getFloat64(position, "ep"),
+						PreAccumulatedRealized: s.getFloat64(position, "cr"),
+						UnrealizedPnl:          s.getFloat64(position, "up"),
+						MarginType:             s.getString(position, "mt"),
+						IsolatedWallet:         s.getFloat64(position, "iw"),
+						PositionSide:           s.getString(position, "ps"),
 					})
 				}
 			}
 		}
 	}
+
 	return result
 }
 
-// parseOrderUpdate 解析订单更新
-func (uds *UserDataStream) parseOrderUpdate(msg map[string]interface{}) interface{} {
-	orderData := msg
-	if o, ok := msg["o"].(map[string]interface{}); ok {
+// parseOrderUpdate 解析订单更新 - 性能优化版本
+func (s *UserDataStream) parseOrderUpdate(data map[string]interface{}) *types.WatchOrderUpdate {
+	var orderData map[string]interface{}
+	if o, ok := data["o"].(map[string]interface{}); ok {
 		orderData = o
+	} else {
+		orderData = data
 	}
 
 	return &types.WatchOrderUpdate{
-		EventType:          getString(msg, "e"),
-		EventTime:          getInt64(msg, "E"),
-		Symbol:             getString(orderData, "s"),
-		ClientOrderID:      getString(orderData, "c"),
-		Side:               getString(orderData, "S"),
-		OrderType:          getString(orderData, "o"),
-		OriginalQuantity:   getFloat64(orderData, "q"),
-		OriginalPrice:      getFloat64(orderData, "p"),
-		AveragePrice:       getFloat64(orderData, "ap"),
-		ExecutionType:      getString(orderData, "x"),
-		OrderStatus:        getString(orderData, "X"),
-		OrderID:            getInt64(orderData, "i"),
-		LastQuantityFilled: getFloat64(orderData, "l"),
-		FilledAccumulated:  getFloat64(orderData, "z"),
-		LastPriceFilled:    getFloat64(orderData, "L"),
-		TradeTime:          getInt64(orderData, "T"),
-		Info:               orderData,
+		EventType:          "ORDER_TRADE_UPDATE",
+		EventTime:          s.getInt64(data, "E"),
+		Symbol:             s.getString(orderData, "s"),
+		ClientOrderID:      s.getString(orderData, "c"),
+		Side:               s.getString(orderData, "S"),
+		OrderType:          s.getString(orderData, "o"),
+		OriginalQuantity:   s.getFloat64(orderData, "q"),
+		OriginalPrice:      s.getFloat64(orderData, "p"),
+		AveragePrice:       s.getFloat64(orderData, "ap"),
+		ExecutionType:      s.getString(orderData, "x"),
+		OrderStatus:        s.getString(orderData, "X"),
+		OrderID:            s.getInt64(orderData, "i"),
+		LastQuantityFilled: s.getFloat64(orderData, "l"),
+		FilledAccumulated:  s.getFloat64(orderData, "z"),
+		LastPriceFilled:    s.getFloat64(orderData, "L"),
+		TradeTime:          s.getInt64(orderData, "T"),
+		RealizedProfit:     s.getFloat64(orderData, "rp"),
+		Info:               data,
 	}
 }
 
-// keepaliveLoop listenKey保活循环
-func (uds *UserDataStream) keepaliveLoop() {
-	defer uds.wg.Done()
+// 连接健康检查
+func (s *UserDataStream) isConnectionHealthy() bool {
+	if !s.connected.Load() {
+		return false
+	}
 
-	ticker := time.NewTicker(30 * time.Minute)
-	defer ticker.Stop()
+	conn := s.conn.Load()
+	if conn == nil || !(*conn).IsConnected() {
+		return false
+	}
 
+	// 检查消息超时
+	lastMsg := s.lastMessage.Load()
+	if lastMsg > 0 && time.Now().Unix()-lastMsg > int64(MessageTimeout.Seconds()) {
+		logrus.Warn("Message timeout detected")
+		return false
+	}
+
+	return true
+}
+
+// 错误处理和重连 - 指数退避
+func (s *UserDataStream) handleConnectionError(err error) {
+	s.stats.LastErrorTime.Store(time.Now().Unix())
+
+	if s.errorHandler != nil {
+		s.errorHandler(err)
+	}
+
+	// 关闭当前连接
+	s.connected.Store(false)
+	s.closeConnection()
+}
+
+func (s *UserDataStream) handleReconnect(err error) {
+	if !s.reconnectEnabled.Load() {
+		return
+	}
+
+	count := s.stats.ReconnectCount.Add(1)
+	if count > s.maxReconnectCount {
+		logrus.Errorf("Max reconnect attempts reached (%d), stopping", s.maxReconnectCount)
+		s.reconnectEnabled.Store(false)
+		return
+	}
+
+	if s.reconnectHandler != nil {
+		s.reconnectHandler(int(count), err)
+	}
+
+	// 指数退避，带抖动
+	delay := time.Duration(1<<uint(count-1)) * s.baseDelay
+	if delay > s.maxDelay {
+		delay = s.maxDelay
+	}
+
+	// 添加抖动减少雷群效应
+	jitter := time.Duration(float64(delay) * 0.1 * (0.5 - float64(time.Now().UnixNano()%1000)/1000))
+	delay += jitter
+
+	logrus.Warnf("Reconnecting in %v (attempt %d)", delay, count)
+
+	select {
+	case <-time.After(delay):
+	case <-s.ctx.Done():
+		return
+	}
+}
+
+// 资源清理
+func (s *UserDataStream) closeConnection() {
+	if conn := s.conn.Swap(nil); conn != nil {
+		(*conn).Close()
+	}
+}
+
+func (s *UserDataStream) stopTimers() {
+	if s.listenKeyTicker != nil {
+		s.listenKeyTicker.Stop()
+	}
+	if s.connectionChecker != nil {
+		s.connectionChecker.Stop()
+	}
+}
+
+// drainMessageChannel 清空消息通道
+func (s *UserDataStream) drainMessageChannel() {
+	if s.msgChan == nil {
+		return
+	}
+
+	// 非阻塞清空通道
 	for {
 		select {
-		case <-uds.stopCh:
+		case <-s.msgChan:
+			// 丢弃未处理的消息
+		default:
 			return
-		case <-ticker.C:
-			if uds.listenKey != "" {
-				if err := uds.exchange.KeepaliveListenKey(uds.listenKey); err != nil {
-					logrus.Errorf("刷新listenKey失败: %v, 将重新创建连接", err)
-					// 刷新失败时关闭当前连接，触发重连
-					if uds.connection != nil {
-						uds.connection.Close()
-					}
-					// 创建新的listenKey
-					if newListenKey, createErr := uds.exchange.CreateListenKey(); createErr == nil {
-						uds.listenKey = newListenKey
-					}
-				} else {
-					logrus.Info("listenKey刷新成功")
-				}
-			}
 		}
 	}
 }
 
-// getWebSocketURL 获取WebSocket URL
-func (uds *UserDataStream) getWebSocketURL() string {
-	if uds.exchange != nil && uds.exchange.config != nil {
-		return uds.exchange.config.GetWebSocketURL()
-	}
-	return "wss://fstream.binance.com/ws"
-}
-
-// getMarketType 获取市场类型
-func (uds *UserDataStream) getMarketType() string {
-	if uds.exchange != nil {
-		return uds.exchange.marketType
-	}
-	return "futures"
-}
-
-// convertEventTypeToDataType 转换事件类型
-func (uds *UserDataStream) convertEventTypeToDataType(eventType string) string {
-	switch eventType {
-	case "ACCOUNT_UPDATE":
-		return "account"
-	case "ORDER_TRADE_UPDATE":
-		return "order"
-	default:
-		return "unknown"
-	}
-}
-
-// extractTimestamp 提取时间戳
-func (uds *UserDataStream) extractTimestamp(msg map[string]interface{}) int64 {
-	if eventTime, exists := msg["E"]; exists {
-		if timestamp, ok := eventTime.(float64); ok {
-			return int64(timestamp)
-		}
-	}
-	return time.Now().UnixMilli()
-}
-
-// SetReconnectHandler 设置重连处理器
-func (uds *UserDataStream) SetReconnectHandler(handler func(int, error)) {
-	uds.reconnectHandler = handler
-}
-
-// IsActive 检查是否活跃
-func (uds *UserDataStream) IsActive() bool {
-	return atomic.LoadInt32(&uds.active) == 1
-}
-
-// 工具函数
-func getString(obj map[string]interface{}, key string) string {
+// 工具方法 - 内联优化
+func (s *UserDataStream) getString(obj map[string]interface{}, key string) string {
 	if val, exists := obj[key]; exists {
 		if str, ok := val.(string); ok {
 			return str
@@ -371,7 +712,7 @@ func getString(obj map[string]interface{}, key string) string {
 	return ""
 }
 
-func getFloat64(obj map[string]interface{}, key string) float64 {
+func (s *UserDataStream) getFloat64(obj map[string]interface{}, key string) float64 {
 	if val, exists := obj[key]; exists {
 		switch v := val.(type) {
 		case float64:
@@ -385,7 +726,7 @@ func getFloat64(obj map[string]interface{}, key string) float64 {
 	return 0
 }
 
-func getInt64(obj map[string]interface{}, key string) int64 {
+func (s *UserDataStream) getInt64(obj map[string]interface{}, key string) int64 {
 	if val, exists := obj[key]; exists {
 		switch v := val.(type) {
 		case int64:
@@ -399,4 +740,54 @@ func getInt64(obj map[string]interface{}, key string) int64 {
 		}
 	}
 	return 0
+}
+
+// 公共接口
+func (s *UserDataStream) IsRunning() bool {
+	state := s.state.Load()
+	return state == StateConnecting || state == StateConnected
+}
+
+func (s *UserDataStream) IsConnected() bool {
+	return s.connected.Load()
+}
+
+func (s *UserDataStream) GetStats() map[string]interface{} {
+	uptime := time.Now().Unix() - s.stats.StartTime
+	return map[string]interface{}{
+		"state":             s.state.Load(),
+		"connected":         s.connected.Load(),
+		"uptime_seconds":    uptime,
+		"message_count":     s.stats.MessageCount.Load(),
+		"reconnect_count":   s.stats.ReconnectCount.Load(),
+		"last_message_time": s.stats.LastMessageTime.Load(),
+		"last_error_time":   s.stats.LastErrorTime.Load(),
+		"connected_time":    s.stats.ConnectedTime.Load(),
+		"is_healthy":        s.isConnectionHealthy(),
+	}
+}
+
+// 配置方法
+func (s *UserDataStream) SetErrorHandler(handler func(error)) {
+	s.errorHandler = handler
+}
+
+func (s *UserDataStream) SetReconnectHandler(handler func(int, error)) {
+	s.reconnectHandler = handler
+}
+
+func (s *UserDataStream) SetMaxReconnect(max int32) {
+	s.maxReconnectCount = max
+}
+
+func (s *UserDataStream) EnableReconnect(enabled bool) {
+	s.reconnectEnabled.Store(enabled)
+}
+
+// min 辅助函数
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }

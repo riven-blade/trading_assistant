@@ -29,7 +29,7 @@ func NewMarketManager(binanceClient *binance.Binance) *MarketManager {
 func (mm *MarketManager) StartPriceSubscriptions() error {
 	logrus.Info("开始启动全局markPrice订阅...")
 
-	// 启动价格管理器（自动订阅 !markPrice@arr 流）
+	// 启动价格管理器
 	if err := mm.priceManager.Start(); err != nil {
 		return fmt.Errorf("启动价格管理器失败: %v", err)
 	}

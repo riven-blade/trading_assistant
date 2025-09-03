@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,6 +74,15 @@ func (ws *WebSocketConnection) connect(ctx context.Context) error {
 		}
 		return connErr
 	}
+
+	// 设置读写超时
+	conn.SetReadDeadline(time.Time{})  // 无限期读取
+	conn.SetWriteDeadline(time.Time{}) // 无限期写入
+
+	// 设置Pong处理器
+	conn.SetPongHandler(func(appData string) error {
+		return nil
+	})
 
 	wsCtx, cancel := context.WithCancel(ctx)
 
@@ -182,8 +192,30 @@ func (ws *WebSocketConnection) messageLoop() {
 		default:
 			_, message, err := ws.conn.ReadMessage()
 			if err != nil {
-				if ws.errorHandler != nil {
-					ws.errorHandler(err)
+				// 检查是否是正常的连接关闭
+				if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+					if ws.errorHandler != nil {
+						ws.errorHandler(fmt.Errorf("websocket连接正常关闭: %w", err))
+					}
+				} else if strings.Contains(err.Error(), "continuation after FIN") {
+					// 特殊处理这种协议错误
+					if ws.errorHandler != nil {
+						ws.errorHandler(fmt.Errorf("websocket协议错误(continuation after FIN): %w", err))
+					}
+				} else if strings.Contains(err.Error(), "RSV2 set") || strings.Contains(err.Error(), "bad opcode") {
+					// 特殊处理RSV2和opcode错误
+					if ws.errorHandler != nil {
+						ws.errorHandler(fmt.Errorf("websocket协议错误(RSV2/opcode): %w", err))
+					}
+				} else if strings.Contains(err.Error(), "use of closed network connection") {
+					// 处理已关闭的网络连接错误
+					if ws.errorHandler != nil {
+						ws.errorHandler(fmt.Errorf("网络连接已关闭: %w", err))
+					}
+				} else {
+					if ws.errorHandler != nil {
+						ws.errorHandler(err)
+					}
 				}
 				return
 			}

@@ -127,31 +127,49 @@ const PositionCard = ({ position, currentPrice, onAction, onViewDetails }) => {
           <button 
             className="control-btn primary-btn"
             onClick={() => onAction(position, 'addition')}
+            style={{ position: 'relative' }}
           >
             加仓
+            {position.additionCount > 0 && (
+              <span className="action-count-badge">
+                {position.additionCount}
+              </span>
+            )}
           </button>
           <button 
             className="control-btn success-btn"
             onClick={() => onAction(position, 'take_profit')}
+            style={{ position: 'relative' }}
           >
             止盈
+            {position.takeProfitCount > 0 && (
+              <span className="action-count-badge">
+                {position.takeProfitCount}
+              </span>
+            )}
           </button>
           <button 
             className="control-btn danger-btn"
             onClick={() => onAction(position, 'stop_loss')}
+            style={{ position: 'relative' }}
           >
             止损
+            {position.stopLossCount > 0 && (
+              <span className="action-count-badge">
+                {position.stopLossCount}
+              </span>
+            )}
           </button>
         </div>
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
           <button 
             className="control-btn success-btn"
             onClick={() => onViewDetails(position)}
-            style={{ flex: 1 }}
+            style={{ flex: 1, position: 'relative' }}
           >
-            查看详情
+            监听
             {position.monitorCount > 0 && (
-              <span className="monitor-count-badge">
+              <span className="action-count-badge">
                 {position.monitorCount}
               </span>
             )}

@@ -73,16 +73,30 @@ const Positions = () => {
           estimate.side === position.side.toLowerCase()
         );
         
+        // 按操作类型统计数量
+        const additionCount = filteredEstimates.filter(estimate => estimate.action_type === 'addition').length;
+        const takeProfitCount = filteredEstimates.filter(estimate => estimate.action_type === 'take_profit').length;
+        const stopLossCount = filteredEstimates.filter(estimate => estimate.action_type === 'stop_loss').length;
+        
         return {
           ...position,
-          monitorCount: filteredEstimates.length
+          monitorCount: filteredEstimates.length,
+          additionCount,
+          takeProfitCount,
+          stopLossCount
         };
       });
       
       setPositionsWithMonitors(positionsWithCount);
     } catch (error) {
       console.error('计算持仓监听数量失败:', error);
-      setPositionsWithMonitors(positionsData.map(pos => ({ ...pos, monitorCount: 0 })));
+      setPositionsWithMonitors(positionsData.map(pos => ({ 
+        ...pos, 
+        monitorCount: 0, 
+        additionCount: 0, 
+        takeProfitCount: 0, 
+        stopLossCount: 0 
+      })));
     }
   }, [getEstimatesBySymbol]);
 

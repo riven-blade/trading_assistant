@@ -30,13 +30,13 @@ type WebSocketConfig struct {
 // DefaultWebSocketConfig 默认配置
 func DefaultWebSocketConfig() *WebSocketConfig {
 	return &WebSocketConfig{
-		MaxConnections:         10,
-		StreamsPerConnection:   100, // 降低单连接负载，强制分散
-		MaxReconnectAttempts:   5,
-		BatchSize:              50,                     // 减小批量大小，更频繁处理
-		BatchInterval:          100 * time.Millisecond, // 增加间隔，减少压力
-		HealthCheckInterval:    30 * time.Second,
-		DataProcessConcurrency: 10, // 默认并发处理10个币种
+		MaxConnections:         5,                      // 减少连接数，Mark Price 单连接即可处理
+		StreamsPerConnection:   200,                    // 增加单连接流数量，减少连接管理开销
+		MaxReconnectAttempts:   3,                      // 减少重连次数，快速失败
+		BatchSize:              20,                     // 进一步减小批量，适合Mark Price订阅
+		BatchInterval:          200 * time.Millisecond, // 适度增加间隔，符合Binance频率限制
+		HealthCheckInterval:    15 * time.Second,       // 缩短健康检查间隔
+		DataProcessConcurrency: 20,                     // 增加并发数，适应更多币种
 	}
 }
 
@@ -90,6 +90,11 @@ type WSConnection struct {
 }
 
 // NewWebSocket 创建WebSocket客户端
+//
+// Mark Price 订阅示例:
+//
+//	ws.SubscribeMarkPrice()                              // 订阅全市场所有币种
+//	ws.SubscribeMarkPrice("BTCUSDT", "ETHUSDT")         // 订阅特定币种
 func NewWebSocket(exchange *Binance, config *WebSocketConfig) *WebSocket {
 	if config == nil {
 		config = DefaultWebSocketConfig()
@@ -152,19 +157,46 @@ func (ws *WebSocket) Stop() {
 	ws.connMutex.Unlock()
 }
 
-// SubscribeStream 订阅数据流
-func (ws *WebSocket) SubscribeStream(streamName string) error {
+// SubscribeMarkPrice 订阅标记价格
+func (ws *WebSocket) SubscribeMarkPrice() error {
 	if atomic.LoadInt32(&ws.isRunning) == 0 {
 		return fmt.Errorf("websocket not running")
 	}
 
-	// 记录到全局订阅状态
+	// 直接订阅全市场流
+	streamName := StreamMarkPriceArray1s
+
 	ws.allStreamsMux.Lock()
 	ws.allStreams[streamName] = true
 	ws.allStreamsMux.Unlock()
 
-	// 添加到批量队列
-	ws.addToBatch(streamName)
+	conn := ws.selectBestConnection()
+	if conn == nil {
+		return fmt.Errorf("no connection available")
+	}
+
+	subscribeMsg := map[string]interface{}{
+		FieldMethod: MethodSubscribe,
+		FieldParams: []string{streamName},
+		FieldId:     time.Now().UnixNano(),
+	}
+
+	if err := ws.msgRateLimiter.Wait(ws.ctx); err != nil {
+		return err
+	}
+
+	if err := conn.ws.SendMessage(subscribeMsg); err != nil {
+		return fmt.Errorf("failed to subscribe global mark price: %w", err)
+	}
+
+	atomic.AddInt32(&conn.streamCount, 1)
+	conn.lastUsed = time.Now()
+
+	conn.streamsMux.Lock()
+	conn.streams[streamName] = true
+	conn.streamsMux.Unlock()
+
+	logrus.Infof("成功订阅全市场标记价格流: %s", streamName)
 	return nil
 }
 
@@ -270,7 +302,6 @@ func (ws *WebSocket) handleArrayMessage(data []byte) error {
 		return fmt.Errorf("parse array message failed: %w", err)
 	}
 
-	// 目前只有 !markPrice@arr 使用数组格式，直接处理为标记价格数组
 	return ws.handleMarkPriceArray(arrData)
 }
 
@@ -299,70 +330,95 @@ func (ws *WebSocket) handleObjectMessage(data []byte) error {
 }
 
 // handleMarkPriceArray 处理标记价格数组数据
-// 用于处理 Binance !markPrice@arr 全局标记价格流，这个流返回所有交易对的标记价格数据
 func (ws *WebSocket) handleMarkPriceArray(arrData []interface{}) error {
 	if ws.publishFunc == nil {
 		return nil
 	}
 
-	// 使用带缓冲的channel控制并发数，避免过载
-	maxConcurrency := ws.config.DataProcessConcurrency
-	if maxConcurrency <= 0 {
-		maxConcurrency = 10 // 默认值
+	dataCount := len(arrData)
+	if dataCount == 0 {
+		return nil
 	}
+
+	// 动态调整并发数：数据量小时减少并发，避免开销
+	maxConcurrency := ws.config.DataProcessConcurrency
+	if dataCount < 100 {
+		if dataCount/10+1 < maxConcurrency {
+			maxConcurrency = dataCount/10 + 1
+		}
+	}
+
 	semaphore := make(chan struct{}, maxConcurrency)
 	var wg sync.WaitGroup
 
-	// 预处理：收集有效的价格数据，避免创建不必要的goroutine
-	var validPriceData []map[string]interface{}
+	// 使用对象池减少内存分配
+	validDataPool := make([]map[string]interface{}, 0, dataCount)
+
+	// 预筛选有效数据，减少goroutine创建
 	for i := range arrData {
 		if priceObj, ok := arrData[i].(map[string]interface{}); ok {
-			// 快速检查symbol是否存在，避免完整解析无效数据
 			if symbol, exists := priceObj[FieldSymbol]; exists && symbol != "" {
-				validPriceData = append(validPriceData, priceObj)
+				validDataPool = append(validDataPool, priceObj)
 			}
 		}
 	}
 
-	// 并发处理有效的价格数据
-	for i := range validPriceData {
-		priceObj := validPriceData[i]
+	validCount := len(validDataPool)
+	if validCount == 0 {
+		return nil
+	}
+
+	// 批量处理，减少goroutine数量
+	batchSize := 1
+	if validCount/maxConcurrency > batchSize {
+		batchSize = validCount / maxConcurrency
+	}
+
+	for i := 0; i < validCount; i += batchSize {
+		end := i + batchSize
+		if end > validCount {
+			end = validCount
+		}
+		batch := validDataPool[i:end]
+
 		wg.Add(1)
-		go func(priceData map[string]interface{}) {
+		go func(dataBatch []map[string]interface{}) {
 			defer wg.Done()
 
-			// 获取信号量，限制并发数
 			semaphore <- struct{}{}
 			defer func() { <-semaphore }()
 
-			// 解析单个标记价格数据
-			markPrice := ws.parseMarkPriceSingle(priceData)
-			if markPrice == nil {
-				return // 跳过无效数据
-			}
+			// 批量处理数据
+			for _, priceData := range dataBatch {
+				markPrice := ws.parseMarkPriceSingle(priceData)
+				if markPrice == nil {
+					continue
+				}
 
-			// 构造并发布数据到订阅者
-			if err := ws.publishWithMetaData(markPrice.Symbol, "markPrice", "!markPrice@arr", markPrice.TimeStamp, markPrice); err != nil {
-				logrus.Errorf("发布标记价格数据失败 %s: %v", markPrice.Symbol, err)
+				if err := ws.publishWithMetaData(markPrice.Symbol, "markPrice", StreamMarkPriceArray1s, markPrice.TimeStamp, markPrice); err != nil {
+					logrus.Errorf("发布标记价格数据失败 %s: %v", markPrice.Symbol, err)
+				}
 			}
-		}(priceObj)
+		}(batch)
 	}
 
-	// 等待所有goroutine完成
-	start := time.Now()
-	wg.Wait()
-	duration := time.Since(start)
+	// 异步等待完成，避免阻塞
+	go func() {
+		start := time.Now()
+		wg.Wait()
+		duration := time.Since(start)
 
-	// 性能监控日志（每1000次记录一次）
-	if atomic.AddInt64(&ws.msgCount, 1)%1000 == 0 {
-		logrus.Debugf("批量处理 %d 个币种数据，耗时: %v, 并发数: %d",
-			len(validPriceData), duration, maxConcurrency)
-	}
+		// 性能监控（每500次记录一次，减少日志量）
+		if atomic.AddInt64(&ws.msgCount, 1)%500 == 0 {
+			logrus.Debugf("批量处理 %d 个币种数据，耗时: %v, 并发数: %d, 批量大小: %d",
+				validCount, duration, maxConcurrency, batchSize)
+		}
+	}()
 
 	return nil
 }
 
-// publishWithMetaData 辅助方法：构造MetaData并发布数据
+// publishWithMetaData
 func (ws *WebSocket) publishWithMetaData(marketID, dataType, stream string, timestamp int64, data interface{}) error {
 	if ws.publishFunc == nil {
 		return nil
@@ -472,7 +528,7 @@ func (ws *WebSocket) parseMarkPriceSingle(priceObj map[string]interface{}) *type
 // parseStreamInfo 解析流信息
 func (ws *WebSocket) parseStreamInfo(streamName string) (eventType, symbol string) {
 	// 处理标记价格数组流
-	if streamName == "!markPrice@arr" {
+	if streamName == StreamMarkPriceArray1s {
 		return EventTypeMarkPrice, "ALL" // 使用特殊symbol标识所有币种
 	}
 
@@ -509,7 +565,7 @@ func (ws *WebSocket) parseDepthUpdate(msg map[string]interface{}) *types.WatchOr
 		if bidArray, ok := bidData.([]interface{}); ok && len(bidArray) >= 2 {
 			price, _ := strconv.ParseFloat(bidArray[0].(string), 64)
 			quantity, _ := strconv.ParseFloat(bidArray[1].(string), 64)
-			// 只保留数量大于0的价格档位（数量为0表示移除该档位）
+			// 只保留数量大于0的价格档位
 			if quantity > 0 {
 				bids = append(bids, []float64{price, quantity})
 			}
@@ -520,7 +576,7 @@ func (ws *WebSocket) parseDepthUpdate(msg map[string]interface{}) *types.WatchOr
 		if askArray, ok := askData.([]interface{}); ok && len(askArray) >= 2 {
 			price, _ := strconv.ParseFloat(askArray[0].(string), 64)
 			quantity, _ := strconv.ParseFloat(askArray[1].(string), 64)
-			// 只保留数量大于0的价格档位（数量为0表示移除该档位）
+			// 只保留数量大于0的价格档位
 			if quantity > 0 {
 				asks = append(asks, []float64{price, quantity})
 			}
@@ -588,110 +644,6 @@ func (ws *WebSocket) parseMarkPrice(msg map[string]interface{}) *types.WatchMark
 	return markPrice
 }
 
-// ========== 用户数据流解析方法 ==========
-
-// parseAccountUpdate 解析账户更新事件
-func (ws *WebSocket) parseAccountUpdate(msg map[string]interface{}) *types.WatchAccountUpdate {
-	result := &types.WatchAccountUpdate{
-		EventType:       ws.SafeString(msg, FieldEventType, ""),
-		EventTime:       ws.SafeInt(msg, FieldEventTime, 0),
-		TransactionTime: ws.SafeInt(msg, "T", 0), // 交易时间
-		Info:            msg,
-	}
-
-	// 解析账户信息
-	if accountData, ok := msg["a"].(map[string]interface{}); ok {
-		// 解析余额信息
-		if balancesData, ok := accountData["B"].([]interface{}); ok {
-			for _, balanceItem := range balancesData {
-				if balanceData, ok := balanceItem.(map[string]interface{}); ok {
-					balance := types.WatchBalanceUpdate{
-						EventType:          result.EventType,
-						EventTime:          result.EventTime,
-						Asset:              ws.SafeString(balanceData, "a", ""), // 资产名称
-						WalletBalance:      ws.SafeFloat(balanceData, "wb", 0),  // 钱包余额
-						CrossWalletBalance: ws.SafeFloat(balanceData, "cw", 0),  // 全仓钱包余额
-						BalanceChange:      ws.SafeFloat(balanceData, "bc", 0),  // 余额变化
-						Info:               balanceData,
-					}
-					result.Balances = append(result.Balances, balance)
-				}
-			}
-		}
-
-		// 解析持仓信息
-		if positionsData, ok := accountData["P"].([]interface{}); ok {
-			for _, positionItem := range positionsData {
-				if positionData, ok := positionItem.(map[string]interface{}); ok {
-					position := types.WatchPositionUpdate{
-						EventType:              result.EventType,
-						EventTime:              result.EventTime,
-						Symbol:                 ws.SafeString(positionData, "s", ""),  // 交易对
-						PositionAmount:         ws.SafeFloat(positionData, "pa", 0),   // 持仓数量
-						EntryPrice:             ws.SafeFloat(positionData, "ep", 0),   // 持仓成本
-						PreAccumulatedRealized: ws.SafeFloat(positionData, "cr", 0),   // 历史累计实现盈亏
-						UnrealizedPnl:          ws.SafeFloat(positionData, "up", 0),   // 持仓未实现盈亏
-						MarginType:             ws.SafeString(positionData, "mt", ""), // 保证金模式
-						IsolatedWallet:         ws.SafeFloat(positionData, "iw", 0),   // 逐仓钱包余额
-						PositionSide:           ws.SafeString(positionData, "ps", ""), // 持仓方向
-						Info:                   positionData,
-					}
-					result.Positions = append(result.Positions, position)
-				}
-			}
-		}
-	}
-
-	return result
-}
-
-// parseOrderTradeUpdate 解析订单交易更新事件
-func (ws *WebSocket) parseOrderTradeUpdate(msg map[string]interface{}) *types.WatchOrderUpdate {
-	// 获取订单数据
-	var orderData map[string]interface{}
-	if data, ok := msg["o"].(map[string]interface{}); ok {
-		orderData = data
-	} else {
-		orderData = msg
-	}
-
-	return &types.WatchOrderUpdate{
-		EventType:          ws.SafeString(msg, FieldEventType, ""),
-		EventTime:          ws.SafeInt(msg, FieldEventTime, 0),
-		Symbol:             ws.SafeString(orderData, "s", ""),            // 交易对
-		ClientOrderID:      ws.SafeString(orderData, "c", ""),            // 客户端订单ID
-		Side:               ws.SafeString(orderData, "S", ""),            // 买卖方向
-		OrderType:          ws.SafeString(orderData, "o", ""),            // 订单类型
-		TimeInForce:        ws.SafeString(orderData, "f", ""),            // 有效时间类型
-		OriginalQuantity:   ws.SafeFloat(orderData, "q", 0),              // 原始数量
-		OriginalPrice:      ws.SafeFloat(orderData, "p", 0),              // 原始价格
-		AveragePrice:       ws.SafeFloat(orderData, "ap", 0),             // 平均成交价格
-		StopPrice:          ws.SafeString(orderData, "sp", ""),           // 止损价格
-		ExecutionType:      ws.SafeString(orderData, "x", ""),            // 执行类型
-		OrderStatus:        ws.SafeString(orderData, "X", ""),            // 订单状态
-		OrderID:            ws.SafeInt(orderData, "i", 0),                // 订单ID
-		LastQuantityFilled: ws.SafeFloat(orderData, "l", 0),              // 成交数量
-		FilledAccumulated:  ws.SafeFloat(orderData, "z", 0),              // 累计成交数量
-		LastPriceFilled:    ws.SafeFloat(orderData, "L", 0),              // 成交价格
-		CommissionAmount:   ws.SafeString(orderData, "n", ""),            // 手续费数量
-		CommissionAsset:    ws.SafeString(orderData, "N", ""),            // 手续费资产类型
-		TradeTime:          ws.SafeInt(orderData, "T", 0),                // 成交时间
-		TradeID:            ws.SafeInt(orderData, "t", 0),                // 成交ID
-		BidsNotional:       ws.SafeString(orderData, "b", ""),            // 买单净值
-		AsksNotional:       ws.SafeString(orderData, "a", ""),            // 卖单净值
-		IsMakerSide:        ws.SafeString(orderData, "m", "") == "true",  // 是否为挂单成交
-		IsReduceOnly:       ws.SafeString(orderData, "R", "") == "true",  // 是否为只减仓单
-		WorkingType:        ws.SafeString(orderData, "wt", ""),           // 条件价格触发类型
-		OriginalOrderType:  ws.SafeString(orderData, "ot", ""),           // 原始订单类型
-		PositionSide:       ws.SafeString(orderData, "ps", ""),           // 持仓方向
-		IsClosePosition:    ws.SafeString(orderData, "cp", "") == "true", // 是否条件全平仓
-		ActivationPrice:    ws.SafeString(orderData, "AP", ""),           // 跟踪止损激活价格
-		CallbackRate:       ws.SafeString(orderData, "cr", ""),           // 跟踪止损回调比例
-		RealizedProfit:     ws.SafeFloat(orderData, "rp", 0),             // 该交易实现盈亏
-		Info:               msg,
-	}
-}
-
 // 辅助方法
 func (ws *WebSocket) convertEventTypeToDataType(eventType string) string {
 	switch eventType {
@@ -703,16 +655,6 @@ func (ws *WebSocket) convertEventTypeToDataType(eventType string) string {
 		return "markPrice"
 	case EventTypeDepthUpdate:
 		return "orderbook"
-	case EventTypeAccountUpdate:
-		return "account"
-	case EventTypeOrderTradeUpdate:
-		return "order"
-	case EventTypeBalanceUpdate:
-		return "balance"
-	case EventTypeExecutionReport:
-		return "execution"
-	case EventTypeOutboundAccountPosition:
-		return "position"
 	default:
 		return ""
 	}
@@ -805,7 +747,7 @@ type MessageRateLimiter struct {
 
 func NewMessageRateLimiter() *MessageRateLimiter {
 	return &MessageRateLimiter{
-		interval: 150 * time.Millisecond, // 稍微降低间隔，配合小批量
+		interval: 200 * time.Millisecond, // 符合Binance每秒5个消息的限制 (200ms = 5/s)
 	}
 }
 

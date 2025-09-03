@@ -31,7 +31,7 @@ type Binance struct {
 
 	// WebSocket连接池
 	wsClient       *WebSocket
-	userDataStream *UserDataStream // 独立的用户数据流管理器
+	userDataStream *UserDataStream // 独立的期货用户数据流管理器
 
 	// 缓存字段
 	lastServerTimeRequest int64
@@ -74,7 +74,7 @@ func New(config *Config) (*Binance, error) {
 		wsConfig := DefaultWebSocketConfig()
 		binance.wsClient = NewWebSocket(binance, wsConfig)
 
-		// 初始化独立的用户数据流管理器
+		// 初始化独立的期货用户数据流管理器
 		binance.userDataStream = NewUserDataStream(binance)
 	}
 
@@ -1354,7 +1354,7 @@ func (b *Binance) SubscribeToOrderbook(symbol string, publishFunc func(types.Met
 
 	b.wsClient.publishFunc = publishFunc
 	streamName := fmt.Sprintf("%s@depth", strings.ToLower(strings.Replace(symbol, "/", "", -1)))
-	return b.wsClient.SubscribeStream(streamName)
+	return b.wsClient.UnsubscribeStream(streamName) // 注意：当前WebSocket实现主要专注于MarkPrice，此功能可能需要扩展
 }
 
 // UnsubscribeFromOrderbook 取消订阅订单簿
@@ -1378,9 +1378,8 @@ func (b *Binance) SubscribeToMarkPrice(publishFunc func(types.MetaData, interfac
 		b.wsClient.SetPublishFunc(publishFunc)
 	}
 
-	// 订阅所有币种的标记价格流
-	streamName := "!markPrice@arr"
-	return b.wsClient.SubscribeStream(streamName)
+	// 订阅所有币种的标记价格流（使用新的简化API）
+	return b.wsClient.SubscribeMarkPrice()
 }
 
 // UnsubscribeFromMarkPrice 取消订阅标记价格数组流
@@ -1389,8 +1388,7 @@ func (b *Binance) UnsubscribeFromMarkPrice() error {
 		return fmt.Errorf("websocket not initialized")
 	}
 
-	streamName := "!markPrice@arr"
-	return b.wsClient.UnsubscribeStream(streamName)
+	return b.wsClient.UnsubscribeStream(StreamMarkPriceArray1s)
 }
 
 // ========== 用户数据流订阅方法 ==========
@@ -1431,6 +1429,21 @@ func (b *Binance) SetUserDataReconnectHandler(handler func(int, error)) {
 	if b.userDataStream != nil {
 		b.userDataStream.SetReconnectHandler(handler)
 	}
+}
+
+// SetUserDataErrorHandler 设置用户数据流错误处理器
+func (b *Binance) SetUserDataErrorHandler(handler func(error)) {
+	if b.userDataStream != nil {
+		b.userDataStream.SetErrorHandler(handler)
+	}
+}
+
+// GetUserDataStats 获取用户数据流统计信息
+func (b *Binance) GetUserDataStats() map[string]interface{} {
+	if b.userDataStream != nil {
+		return b.userDataStream.GetStats()
+	}
+	return nil
 }
 
 // ========== 期货交易API ==========
