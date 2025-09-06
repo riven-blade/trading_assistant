@@ -57,6 +57,10 @@ type Client struct {
 
 	// 最后活跃时间
 	lastActivity time.Time
+
+	// 客户端状态
+	closed     bool
+	closeMutex sync.RWMutex
 }
 
 // Message 表示WebSocket消息格式
@@ -131,7 +135,7 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- data:
 				default:
-					close(client.send)
+					client.safeClose()
 					delete(h.clients, client)
 				}
 			}
@@ -140,7 +144,7 @@ func (h *Hub) Run() {
 			h.clientsMutex.Lock()
 			if _, ok := h.clients[client]; ok {
 				delete(h.clients, client)
-				close(client.send)
+				client.safeClose()
 
 				// 从所有订阅中移除客户端
 				h.subsMutex.Lock()
@@ -160,7 +164,7 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- message:
 				default:
-					close(client.send)
+					client.safeClose()
 					delete(h.clients, client)
 				}
 			}
@@ -221,19 +225,44 @@ func (h *Hub) BroadcastToSubscribers(dataType string, data interface{}) {
 
 	// 发送给所有订阅者
 	successCount := 0
+	failedClients := make([]*Client, 0)
+
 	for i := range clientList {
 		client := clientList[i]
-		select {
-		case client.send <- messageData:
-			successCount++
-		default:
-			// 客户端发送缓冲区已满，移除该客户端
-			h.unregisterClient(client)
+
+		// 检查客户端是否已关闭
+		if client.isClosed() {
+			failedClients = append(failedClients, client)
+			continue
 		}
+
+		// 使用defer + recover来捕获panic
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					logrus.Warnf("向客户端 %s 发送数据时发生panic: %v", client.id, r)
+					failedClients = append(failedClients, client)
+				}
+			}()
+
+			select {
+			case client.send <- messageData:
+				successCount++
+			default:
+				// 客户端发送缓冲区已满，标记为失败
+				failedClients = append(failedClients, client)
+			}
+		}()
 	}
 
-	logrus.Debugf("向 %d 个订阅 %s 的客户端发送数据，成功 %d 个",
-		len(clientList), dataType, successCount)
+	// 清理失败的客户端
+	for i := range failedClients {
+		client := failedClients[i]
+		h.unregisterClient(client)
+	}
+
+	logrus.Debugf("向 %d 个订阅 %s 的客户端发送数据，成功 %d 个，失败 %d 个",
+		len(clientList), dataType, successCount, len(failedClients))
 }
 
 // Subscribe 客户端订阅数据类型
@@ -280,6 +309,11 @@ func (h *Hub) Unsubscribe(client *Client, dataType string) {
 
 // unregisterClient 注销客户端
 func (h *Hub) unregisterClient(client *Client) {
+	// 检查客户端是否已经关闭
+	if client.isClosed() {
+		return
+	}
+
 	select {
 	case h.unregister <- client:
 	default:
@@ -287,9 +321,27 @@ func (h *Hub) unregisterClient(client *Client) {
 		h.clientsMutex.Lock()
 		if _, ok := h.clients[client]; ok {
 			delete(h.clients, client)
-			close(client.send)
+			client.safeClose()
 		}
 		h.clientsMutex.Unlock()
+	}
+}
+
+// isClosed 检查客户端是否已经关闭
+func (c *Client) isClosed() bool {
+	c.closeMutex.RLock()
+	defer c.closeMutex.RUnlock()
+	return c.closed
+}
+
+// safeClose 安全关闭客户端
+func (c *Client) safeClose() {
+	c.closeMutex.Lock()
+	defer c.closeMutex.Unlock()
+
+	if !c.closed {
+		c.closed = true
+		close(c.send)
 	}
 }
 
@@ -484,11 +536,16 @@ func (c *Client) sendMessage(msg *Message) {
 		return
 	}
 
+	// 检查客户端是否已关闭
+	if c.isClosed() {
+		return
+	}
+
 	select {
 	case c.send <- data:
 	default:
 		// 发送缓冲区已满，关闭连接
-		close(c.send)
+		c.safeClose()
 	}
 }
 
@@ -563,6 +620,12 @@ func (h *Hub) sendInitialDataForType(client *Client, dataType string) {
 	messageData, err := json.Marshal(message)
 	if err != nil {
 		logrus.Errorf("序列化初始数据失败: %v", err)
+		return
+	}
+
+	// 检查客户端是否已关闭
+	if client.isClosed() {
+		logrus.Debugf("客户端 %s 已关闭，跳过发送初始 %s 数据", client.id, dataType)
 		return
 	}
 

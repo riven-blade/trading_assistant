@@ -572,7 +572,8 @@ func (ws *WebSocket) parseDepthUpdate(msg map[string]interface{}) *types.WatchOr
 		}
 	}
 
-	for _, askData := range asksData {
+	for i := range asksData {
+		askData := asksData[i]
 		if askArray, ok := askData.([]interface{}); ok && len(askArray) >= 2 {
 			price, _ := strconv.ParseFloat(askArray[0].(string), 64)
 			quantity, _ := strconv.ParseFloat(askArray[1].(string), 64)

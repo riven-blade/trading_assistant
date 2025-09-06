@@ -3,6 +3,7 @@ package redis
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"trading_assistant/models"
 
 	"github.com/sirupsen/logrus"
@@ -174,6 +175,42 @@ func (c *Client) GetAllEstimatesBySymbol(symbol string) ([]*models.PriceEstimate
 	}
 
 	return estimates, nil
+}
+
+// GetListeningEstimateBySymbolSideAction 检查指定交易对、方向和操作类型的监听中估价
+func (c *Client) GetListeningEstimateBySymbolSideAction(symbol, side, actionType string) (*models.PriceEstimate, error) {
+	// 确保参数格式一致性：symbol大写，side小写
+	symbolUpper := strings.ToUpper(symbol)
+	sideLower := strings.ToLower(side)
+
+	keys, err := c.rdb.Keys(c.ctx, fmt.Sprintf("%s:*", KeyPriceEstimate)).Result()
+	if err != nil {
+		return nil, err
+	}
+
+	for i := range keys {
+		key := keys[i]
+		data, err := c.rdb.Get(c.ctx, key).Result()
+		if err != nil {
+			continue
+		}
+
+		var estimate models.PriceEstimate
+		if err := json.Unmarshal([]byte(data), &estimate); err != nil {
+			continue
+		}
+
+		// 检查是否匹配条件：相同交易对、相同方向、相同操作类型、状态为监听中、已启用
+		if estimate.Symbol == symbolUpper &&
+			estimate.Side == sideLower &&
+			estimate.ActionType == actionType &&
+			estimate.Status == models.EstimateStatusListening &&
+			estimate.Enabled {
+			return &estimate, nil
+		}
+	}
+
+	return nil, nil // 没有找到匹配的监听中估价
 }
 
 // DeletePriceEstimate 删除价格预估

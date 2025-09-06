@@ -1132,16 +1132,25 @@ func (b *Binance) parseBalance(data map[string]interface{}) *types.Account {
 					continue
 				}
 
-				var free, locked float64
+				var free, locked, total float64
 				if b.marketType == types.MarketTypeFuture {
-					free = b.SafeFloat(balanceMap, "walletBalance", 0)
-					locked = b.SafeFloat(balanceMap, "marginBalance", 0) - free
+					total = b.SafeFloat(balanceMap, "walletBalance", 0)
+					free = b.SafeFloat(balanceMap, "availableBalance", 0)
+
+					// 如果没有availableBalance字段，回退到marginBalance
+					if free == 0 {
+						free = b.SafeFloat(balanceMap, "marginBalance", 0)
+					}
+
+					locked = total - free
+					if locked < 0 {
+						locked = 0
+					}
 				} else {
 					free = b.SafeFloat(balanceMap, "free", 0)
 					locked = b.SafeFloat(balanceMap, "locked", 0)
+					total = free + locked
 				}
-
-				total := free + locked
 
 				// 只保存有余额的资产
 				if total > 0 {

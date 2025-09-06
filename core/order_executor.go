@@ -116,7 +116,7 @@ type OrderParams struct {
 // prepareOrderParams 准备订单参数
 func (oe *OrderExecutor) prepareOrderParams(estimate *models.PriceEstimate, currentPrice float64) (*OrderParams, error) {
 	// 1. 使用已格式化的交易数量，再次确保精度
-	quantity, err := oe.adjustQuantityPrecision(estimate.Symbol, estimate.Quantity)
+	quantity, err := utils.AdjustQuantityPrecision(estimate.Symbol, estimate.Quantity)
 	if err != nil {
 		return nil, fmt.Errorf("调整数量精度失败: %v", err)
 	}
@@ -182,98 +182,6 @@ func (oe *OrderExecutor) getDualPositionParams(actionType, side string) (orderSi
 		logrus.Errorf("未知的操作类型: %s, 使用默认开多仓", actionType)
 		return types.OrderSideBuy, "LONG", false
 	}
-}
-
-// adjustQuantityPrecision 调整数量精度
-func (oe *OrderExecutor) adjustQuantityPrecision(symbol string, quantity float64) (float64, error) {
-	coin, err := redis.GlobalRedisClient.GetCoin(symbol)
-	if err != nil {
-		// 使用默认精度
-		logrus.WithFields(logrus.Fields{
-			"symbol": symbol,
-			"error":  err.Error(),
-		}).Warn("获取币种精度信息失败，使用默认精度6位")
-		return oe.roundToDecimalPlaces(quantity, 6), nil
-	}
-
-	// 首先调整小数位精度
-	quantityPrecision := coin.GetQuantityPrecisionFromStepSize()
-	adjustedQuantity := oe.roundToDecimalPlaces(quantity, quantityPrecision)
-
-	// 然后验证和调整步长约束
-	if coin.StepSize != "" {
-		stepSize := oe.parseFloat(coin.StepSize)
-		if stepSize > 0 {
-			// 使用数学上更精确的步长调整算法
-			steps := adjustedQuantity / stepSize
-			if math.Abs(steps-math.Round(steps)) > 1e-8 { // 使用容差避免浮点数精度问题
-				// 向上舍入到最近的步长，确保数量不会变为0
-				adjustedSteps := math.Ceil(steps)
-				if adjustedSteps < 1 {
-					adjustedSteps = 1
-				}
-				adjustedQuantity = adjustedSteps * stepSize
-
-				// 确保调整后的数量仍满足最小数量要求
-				minQty := oe.parseFloat(coin.MinQty)
-				if minQty > 0 && adjustedQuantity < minQty {
-					// 如果调整后仍小于最小数量，计算需要的最小步数
-					minSteps := math.Ceil(minQty / stepSize)
-					adjustedQuantity = minSteps * stepSize
-				}
-
-				// 重新应用小数位精度
-				adjustedQuantity = oe.roundToDecimalPlaces(adjustedQuantity, quantityPrecision)
-
-				logrus.WithFields(logrus.Fields{
-					"symbol":            symbol,
-					"original_quantity": quantity,
-					"adjusted_quantity": adjustedQuantity,
-					"step_size":         stepSize,
-					"steps":             adjustedSteps,
-				}).Debug("订单执行时数量步长调整")
-			}
-		}
-	}
-
-	// 最终验证：确保调整后的数量不为0
-	if adjustedQuantity <= 0 {
-		// 如果数量仍然为0，使用最小有效数量
-		minQty := oe.parseFloat(coin.MinQty)
-		stepSize := oe.parseFloat(coin.StepSize)
-
-		if minQty > 0 {
-			adjustedQuantity = minQty
-		} else if stepSize > 0 {
-			adjustedQuantity = stepSize
-		} else {
-			adjustedQuantity = math.Pow(10, -float64(quantityPrecision))
-		}
-
-		logrus.WithFields(logrus.Fields{
-			"symbol":   symbol,
-			"original": quantity,
-			"adjusted": adjustedQuantity,
-			"reason":   "避免数量为0",
-		}).Warn("数量调整后为0，使用最小有效数量")
-	}
-
-	logrus.WithFields(logrus.Fields{
-		"symbol":    symbol,
-		"original":  quantity,
-		"precision": quantityPrecision,
-		"adjusted":  adjustedQuantity,
-		"min_qty":   coin.MinQty,
-		"step_size": coin.StepSize,
-	}).Debug("数量精度调整完成")
-
-	return adjustedQuantity, nil
-}
-
-// roundToDecimalPlaces 四舍五入到指定小数位
-func (oe *OrderExecutor) roundToDecimalPlaces(value float64, places int) float64 {
-	multiplier := math.Pow(10, float64(places))
-	return math.Round(value*multiplier) / multiplier
 }
 
 // getOrderTypeAndPrice 获取订单类型和价格
@@ -491,18 +399,6 @@ func (oe *OrderExecutor) sendOrderNotification(estimate *models.PriceEstimate, o
 	if err := telegram.GlobalTelegramClient.SendMessage(message); err != nil {
 		logrus.Errorf("发送订单通知失败: %v", err)
 	}
-}
-
-// parseFloat 辅助函数，安全地解析浮点数
-func (oe *OrderExecutor) parseFloat(s string) float64 {
-	if s == "" {
-		return 0
-	}
-	val, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
-	}
-	return val
 }
 
 // formatQuantityString 格式化数量为Binance API要求的字符串格式

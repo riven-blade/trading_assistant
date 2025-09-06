@@ -158,9 +158,17 @@ func (pm *PriceMonitor) triggerEstimate(estimate *models.PriceEstimate, currentP
 	if err != nil {
 		logrus.Errorf("双向持仓订单执行失败: %v", err)
 
-		// 发送错误通知
+		// 发送错误通知，包含详细的交易信息
 		if telegram.GlobalTelegramClient != nil {
-			telegram.GlobalTelegramClient.SendError("双向持仓自动下单", err)
+			// 构建详细的错误消息
+			actionText := getActionText(estimate.ActionType)
+			positionText := getPositionText(estimate.Side)
+
+			errorMessage := fmt.Sprintf("双向持仓自动下单 - %s %s %s\n数量: %.6f\n目标价: %.4f\n当前价: %.6f",
+				estimate.Symbol, actionText, positionText,
+				estimate.Quantity, estimate.TargetPrice, currentPrice)
+
+			telegram.GlobalTelegramClient.SendError(errorMessage, err)
 		}
 
 		// 更新预估状态为失败
@@ -216,4 +224,34 @@ func (pm *PriceMonitor) broadcastEstimateTriggerEvent(estimate *models.PriceEsti
 	wsManager.BroadcastEvent(event)
 	logrus.Infof("通过WebSocket广播预估触发事件: %s %s %.4f",
 		estimate.Symbol, estimate.Side, estimate.TargetPrice)
+}
+
+// getActionText 获取操作类型的中文描述
+func getActionText(actionType string) string {
+	switch actionType {
+	case models.ActionTypeOpen:
+		return "开仓"
+	case models.ActionTypeClose:
+		return "平仓"
+	case models.ActionTypeAddition:
+		return "加仓"
+	case models.ActionTypeTakeProfit:
+		return "止盈"
+	case models.ActionTypeStopLoss:
+		return "止损"
+	default:
+		return "交易"
+	}
+}
+
+// getPositionText 获取仓位方向的中文描述
+func getPositionText(side string) string {
+	switch side {
+	case types.PositionSideLong:
+		return "做多"
+	case types.PositionSideShort:
+		return "做空"
+	default:
+		return "未知"
+	}
 }

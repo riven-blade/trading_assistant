@@ -90,7 +90,7 @@ const (
 	// Binance 官方推荐的保活间隔
 	ListenKeyKeepaliveInterval = 30 * time.Minute // listenKey 保活
 	ConnectionCheckInterval    = 10 * time.Second // 连接检查
-	MessageTimeout             = 5 * time.Minute  // 消息超时
+	MessageTimeout             = 65 * time.Minute // 消息超时
 
 	// 重连配置
 	MaxReconnectCount  = 100
@@ -290,7 +290,7 @@ func (s *UserDataStream) connect() error {
 	s.conn.Store(conn)
 	s.listenKey.Store(&listenKey)
 
-	logrus.Infof("Connected to Binance futures user data stream")
+	logrus.Infof("Connected to Binance futures user data stream with listenKey: %s...", listenKey[:8])
 	return nil
 }
 
@@ -310,7 +310,7 @@ func (s *UserDataStream) getValidListenKey() (string, error) {
 		return "", fmt.Errorf("invalid listen key received")
 	}
 
-	logrus.Debugf("Created new listen key: %s...", listenKey[:8])
+	logrus.Infof("成功创建listenKey: %s...", listenKey[:8])
 	return listenKey, nil
 }
 
@@ -611,11 +611,34 @@ func (s *UserDataStream) isConnectionHealthy() bool {
 		return false
 	}
 
-	// 检查消息超时
 	lastMsg := s.lastMessage.Load()
-	if lastMsg > 0 && time.Now().Unix()-lastMsg > int64(MessageTimeout.Seconds()) {
-		logrus.Warn("Message timeout detected")
-		return false
+	lastHeartbeat := s.lastHeartbeat.Load()
+
+	now := time.Now().Unix()
+
+	// 如果从未收到消息，但连接时间不超过消息超时，则认为正常
+	if lastMsg == 0 {
+		connectedTime := s.stats.ConnectedTime.Load()
+		if connectedTime > 0 && now-connectedTime < int64(MessageTimeout.Seconds()) {
+			return true
+		}
+	}
+
+	// 检查消息超时，但要考虑listenKey保活
+	if lastMsg > 0 {
+		timeSinceLastMsg := now - lastMsg
+		timeSinceLastHeartbeat := now - lastHeartbeat
+
+		// 如果消息超时但listenKey保活正常，则连接仍然健康
+		if timeSinceLastMsg > int64(MessageTimeout.Seconds()) {
+			if timeSinceLastHeartbeat < int64(ListenKeyKeepaliveInterval.Seconds()*2) {
+				// listenKey保活正常，用户数据流可能只是没有交易活动
+				logrus.Debug("No user data messages, but listenKey keepalive is healthy")
+				return true
+			}
+			logrus.Warn("Message timeout detected - no messages and no successful keepalive")
+			return false
+		}
 	}
 
 	return true

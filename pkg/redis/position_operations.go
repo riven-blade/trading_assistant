@@ -3,8 +3,10 @@ package redis
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"trading_assistant/models"
 
+	"github.com/redis/go-redis/v9"
 	"github.com/sirupsen/logrus"
 )
 
@@ -25,10 +27,13 @@ func (c *Client) SetPosition(position *models.Position) error {
 
 // GetPosition 获取特定持仓信息
 func (c *Client) GetPosition(symbol, side string) (*models.Position, error) {
-	key := fmt.Sprintf("%s:%s:%s", KeyPosition, symbol, side)
+	// 将side转换为大写以匹配存储格式
+	sideUpper := strings.ToUpper(side)
+	key := fmt.Sprintf("%s:%s:%s", KeyPosition, symbol, sideUpper)
+
 	data, err := c.rdb.Get(c.ctx, key).Result()
 	if err != nil {
-		if err.Error() == "redis: nil" {
+		if err == redis.Nil {
 			return nil, nil
 		}
 		return nil, err
