@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"time"
 	"trading_assistant/models"
+	"trading_assistant/pkg/config"
 	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/exchanges/types"
 	"trading_assistant/pkg/redis"
@@ -147,6 +148,13 @@ func (pm *PriceMonitor) checkSingleEstimate(estimate *models.PriceEstimate) {
 		logrus.Infof("价格目标触发: %s %s %s, 当前标记价格: %f, 目标价格: %f",
 			estimate.Symbol, estimate.Side, actionType, currentPrice, estimate.TargetPrice)
 
+		// 对于做空场景，检查资金费率
+		if estimate.Side == types.PositionSideShort {
+			if !pm.checkFundingRateForShort(estimate, markPriceData) {
+				return
+			}
+		}
+
 		pm.triggerEstimate(estimate, currentPrice)
 	}
 }
@@ -254,4 +262,83 @@ func getPositionText(side string) string {
 	default:
 		return "未知"
 	}
+}
+
+// checkFundingRateForShort 检查做空时的资金费率
+func (pm *PriceMonitor) checkFundingRateForShort(estimate *models.PriceEstimate, markPriceData *types.WatchMarkPrice) bool {
+	// 获取配置中的资金费率阈值
+	threshold := config.GlobalConfig.ShortFundingRateThreshold
+	currentFundingRate := markPriceData.FundingRate
+
+	// 如果资金费率小于阈值
+	if currentFundingRate < threshold {
+		logrus.Warnf("做空触发失败: %s 资金费率 %f < 阈值 %f，不允许开空仓",
+			estimate.Symbol, currentFundingRate, threshold)
+
+		// 更新预估状态为失败
+		estimate.Status = models.EstimateStatusFailed
+		estimate.UpdatedAt = time.Now()
+		err := redis.GlobalRedisClient.SetPriceEstimate(estimate)
+		if err != nil {
+			logrus.Errorf("更新价格预估状态失败: %v", err)
+		}
+
+		// 发送Telegram通知
+		if telegram.GlobalTelegramClient != nil {
+			actionText := getActionText(estimate.ActionType)
+			message := fmt.Sprintf("做空触发失败 - 资金费率检查\n交易对: %s\n操作: %s\n当前资金费率: %.4f%%\n阈值: %.4f%%\n原因: 资金费率过低，不允许开空仓",
+				estimate.Symbol, actionText, currentFundingRate*100, threshold*100)
+			err := telegram.GlobalTelegramClient.SendMessage(message)
+			if err != nil {
+				logrus.Errorf("发送Telegram通知失败: %v", err)
+			}
+		}
+
+		// 通过WebSocket广播失败事件
+		go pm.broadcastFundingRateFailEvent(estimate, currentFundingRate, threshold)
+
+		// 广播预估更新
+		go utils.BroadcastSymbolEstimatesUpdate()
+
+		return false
+	}
+
+	logrus.Debugf("做空资金费率检查通过: %s 资金费率 %f >= 阈值 %f",
+		estimate.Symbol, currentFundingRate, threshold)
+	return true
+}
+
+// broadcastFundingRateFailEvent 广播资金费率检查失败事件到WebSocket客户端
+func (pm *PriceMonitor) broadcastFundingRateFailEvent(estimate *models.PriceEstimate, currentFundingRate, threshold float64) {
+	// 获取WebSocket管理器
+	wsManager := websocket.GetGlobalWebSocketManager()
+	if wsManager == nil {
+		return
+	}
+
+	// 准备事件数据
+	event := map[string]interface{}{
+		"event_type": "funding_rate_check_failed",
+		"timestamp":  time.Now().Unix(),
+		"data": map[string]interface{}{
+			"type": "funding_rate_check_failed",
+			"message": fmt.Sprintf("做空触发失败: %s 资金费率 %.4f%% < 阈值 %.4f%%",
+				estimate.Symbol, currentFundingRate*100, threshold*100),
+			"data": map[string]interface{}{
+				"estimate_id":          estimate.ID,
+				"symbol":               estimate.Symbol,
+				"side":                 estimate.Side,
+				"action_type":          estimate.ActionType,
+				"target_price":         estimate.TargetPrice,
+				"current_funding_rate": currentFundingRate,
+				"threshold":            threshold,
+				"fail_time":            time.Now().Unix(),
+			},
+		},
+	}
+
+	// 广播事件
+	wsManager.BroadcastEvent(event)
+	logrus.Infof("通过WebSocket广播资金费率检查失败事件: %s 资金费率 %.4f%%",
+		estimate.Symbol, currentFundingRate*100)
 }

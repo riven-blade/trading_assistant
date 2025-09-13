@@ -435,8 +435,8 @@ func (t *TelegramClient) executeTradingOrder(symbol, actionType, side string, us
 		}
 	}
 
-	// 默认杠杆3倍
-	leverage := 3
+	// 默认杠杆5倍
+	leverage := 5
 
 	// 计算数量 (USDT金额 / 价格)
 	rawQuantity := usdtAmount * float64(leverage) / price
@@ -781,7 +781,7 @@ func (t *TelegramClient) handleStartCommand() {
 • symbol: 交易对 (如 BTC、BTCUSDT)
 • usdt数量: 使用的USDT金额
 • price: 限价 (可选，不填则使用当前价格)
-• 默认杠杆: 3倍
+• 默认杠杆: 5倍
 • 默认订单类型: 限价单
 
 示例:

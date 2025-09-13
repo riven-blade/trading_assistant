@@ -298,12 +298,12 @@ func (am *AccountManager) refreshBalances() {
 		}
 	}
 
-	// 发送合并的Telegram通知
-	if telegram.GlobalTelegramClient != nil {
-		message := fmt.Sprintf("余额 %.2f USDT | 可用 %.2f | 持仓 %d | PNL %.4f",
-			balanceSummary["net_value"], balanceSummary["usdt_free"], positionCount, totalPnl)
-		telegram.GlobalTelegramClient.SendMessage(message)
-	}
+	// 余额更新不发送 Telegram 通知（根据用户要求禁用）
+	// if telegram.GlobalTelegramClient != nil {
+	//	message := fmt.Sprintf("余额 %.2f USDT | 可用 %.2f | 持仓 %d | PNL %.4f",
+	//		balanceSummary["net_value"], balanceSummary["usdt_free"], positionCount, totalPnl)
+	//	telegram.GlobalTelegramClient.SendMessage(message)
+	// }
 
 	// 通过WebSocket广播余额更新
 	logrus.Infof("准备广播余额更新，净值: %.2f USDT", balanceSummary["net_value"])

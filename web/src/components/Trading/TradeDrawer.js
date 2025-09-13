@@ -218,7 +218,7 @@ const TradeDrawer = ({
             onChange={onLeverageChange}
             style={{ width: '100%' }}
           >
-            {[1, 2, 3, 4, 5].map(leverage => (
+            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(leverage => (
               <Select.Option key={leverage} value={leverage}>
                 {leverage}x
               </Select.Option>
