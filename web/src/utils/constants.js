@@ -102,7 +102,7 @@ export const getDetailedActionText = (actionType, side) => {
 
 // 默认配置
 export const DEFAULT_CONFIG = {
-  leverage: 5,
+  leverage: 10,
   marginMode: 'CROSS', // 默认全仓模式
   orderType: 'limit',
   refreshInterval: {

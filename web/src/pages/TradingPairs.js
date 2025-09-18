@@ -339,11 +339,12 @@ const TradingPairs = () => {
     setTradeModalVisible(true);
   };
 
-  // 计算默认开仓数量
+  // 计算默认开仓数量（10%）
   const getDefaultQuantity = (symbol, price) => {
-    if (!price || !accountValue?.usdt_free) return 0.001;
-    const maxUsdtAmount = accountValue.usdt_free * 0.2; // 使用20%的可用余额作为默认
-    const defaultQuantity = (maxUsdtAmount * selectedLeverage) / price;
+    if (!price) return 0.001;
+    const maxUsdtAmount = 100; // 固定100 USDT
+    const maxQuantity = (maxUsdtAmount * selectedLeverage) / price;
+    const defaultQuantity = maxQuantity * 0.1; // 默认为最大数量的10%
     return Math.max(0.001, parseFloat(defaultQuantity.toFixed(6)));
   };
 

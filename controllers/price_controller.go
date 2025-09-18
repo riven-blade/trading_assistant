@@ -84,7 +84,7 @@ func (p *PriceController) validatePriceEstimateRequest(req *PriceEstimateRequest
 
 	// 设置默认杠杆
 	if req.Leverage <= 0 {
-		req.Leverage = 5 // 默认5倍杠杆
+		req.Leverage = 10 // 默认10倍杠杆
 	}
 
 	return nil

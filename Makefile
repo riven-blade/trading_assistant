@@ -4,7 +4,7 @@
 
 # Docker 相关变量
 IMAGE_NAME := ddhdocker/trading-assistant
-IMAGE_TAG := 0.1.188
+IMAGE_TAG := 0.1.212
 CONTAINER_NAME := trading-assistant-container
 
 # 默认目标

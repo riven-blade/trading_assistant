@@ -61,8 +61,7 @@ const TradeDrawer = ({
   
   // 计算最大数量
   const getMaxQuantity = () => {
-    if (!markPrice || !selectedLeverage || !accountValue?.usdt_free) return 1;
-    const maxUsdtAmount = accountValue.usdt_free * 0.8; // 使用80%的可用余额
+    const maxUsdtAmount = 100;
     // 使用与保证金计算相同的价格逻辑
     const priceToUse = getPriceForCalculation();
     if (priceToUse <= 0) return 1;
@@ -161,6 +160,8 @@ const TradeDrawer = ({
             value={orderType} 
             onChange={onOrderTypeChange}
             style={{ width: '100%' }}
+            size="middle"
+            placeholder="选择订单类型"
           >
             <Select.Option value="market">市价单</Select.Option>
             <Select.Option value="limit">限价单</Select.Option>
@@ -191,17 +192,22 @@ const TradeDrawer = ({
         <Form.Item>
           <TradingSlider
             title={`${baseAsset}数量`}
-            value={quantity || 0.001}
+            value={quantity || (getMaxQuantity() * 0.1)}
             min={0.001}
             max={getMaxQuantity()}
             step={0.001}
             onChange={onQuantityChange}
             marks={{
-              0.001: '0%',
-              [getMaxQuantity() * 0.25]: '25%',
-              [getMaxQuantity() * 0.5]: '50%',
-              [getMaxQuantity() * 0.75]: '75%',
-              [getMaxQuantity()]: '100%'
+              [getMaxQuantity() * 0.1]: '10',
+              [getMaxQuantity() * 0.2]: '20',
+              [getMaxQuantity() * 0.3]: '30',
+              [getMaxQuantity() * 0.4]: '40',
+              [getMaxQuantity() * 0.5]: '50',
+              [getMaxQuantity() * 0.6]: '60',
+              [getMaxQuantity() * 0.7]: '70',
+              [getMaxQuantity() * 0.8]: '80',
+              [getMaxQuantity() * 0.9]: '90',
+              [getMaxQuantity()]: '100'
             }}
             displayLabel="开仓数量:"
             displayValue={`${(quantity || 0)?.toFixed(6)} ${baseAsset}`}
@@ -217,8 +223,11 @@ const TradeDrawer = ({
             value={selectedLeverage} 
             onChange={onLeverageChange}
             style={{ width: '100%' }}
+            size="middle"
+            placeholder="选择杠杆倍数"
+            listHeight={256}
           >
-            {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(leverage => (
+            {[5, 10, 20].map(leverage => (
               <Select.Option key={leverage} value={leverage}>
                 {leverage}x
               </Select.Option>
@@ -232,6 +241,8 @@ const TradeDrawer = ({
             value={marginMode} 
             onChange={onMarginModeChange}
             style={{ width: '100%' }}
+            size="middle"
+            placeholder="选择保证金模式"
           >
             <Select.Option value="ISOLATED">逐仓模式</Select.Option>
             <Select.Option value="CROSS">全仓模式</Select.Option>

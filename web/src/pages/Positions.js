@@ -167,8 +167,17 @@ const Positions = () => {
     const basePrice = priceBase === 'current' ? price : entryPrice;
     let defaultTargetPrice = basePrice * (1 + defaultPercentage / 100);
 
-    // 设置默认数量（持仓数量的50%）
-    let defaultQuantity = Math.abs(position.size) * 0.5;
+    // 设置默认数量
+    let defaultQuantity;
+    if (action === 'addition') {
+      // 加仓：默认为基于100 USDT的10%
+      const maxUsdtAmount = 100;
+      const maxQuantity = (maxUsdtAmount * position.leverage) / defaultTargetPrice;
+      defaultQuantity = maxQuantity * 0.1; // 10%
+    } else {
+      // 止盈/止损：持仓数量的50%
+      defaultQuantity = Math.abs(position.size) * 0.5;
+    }
     
     setPricePercentage(defaultPercentage);
     setTargetPrice(defaultTargetPrice);
@@ -194,7 +203,7 @@ const Positions = () => {
     
     // 对于加仓，价格变化时需要调整数量以保持在最大范围内
     if (actionType === 'addition') {
-      const maxUsdtAmount = accountValue.usdt_free * 0.6;
+      const maxUsdtAmount = 100; // 固定100 USDT
       const newMaxQuantity = (maxUsdtAmount * currentPosition.leverage) / newTargetPrice;
       
       // 如果当前数量超过了新的最大数量，调整到最大数量
@@ -217,8 +226,8 @@ const Positions = () => {
     
     const positionSize = Math.abs(currentPosition.size);
     if (actionType === 'addition') {
-      // 加仓：基于可用余额和目标价格计算，随价格变化
-      const maxUsdtAmount = accountValue.usdt_free * 0.8; // 使用80%的可用余额
+      // 加仓：固定100 USDT金额计算，随价格变化
+      const maxUsdtAmount = 100; // 固定100 USDT
       const priceToUse = targetPrice > 0 ? targetPrice : markPrice; // 使用目标价格
       if (priceToUse > 0 && currentPosition.leverage > 0) {
         // 最大数量 = (最大USDT × 杠杆) ÷ 目标价格

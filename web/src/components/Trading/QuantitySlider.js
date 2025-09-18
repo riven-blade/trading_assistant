@@ -53,11 +53,16 @@ const QuantitySlider = ({
   } else {
     // 数量模式：原有逻辑
     const optimizedMarks = {
-      0: '0%',
-      [maxQuantity * 0.25]: '25%',
-      [maxQuantity * 0.5]: '50%',
-      [maxQuantity * 0.75]: '75%',
-      [maxQuantity]: '100%'
+      [maxQuantity * 0.1]: '10',
+      [maxQuantity * 0.2]: '20',
+      [maxQuantity * 0.3]: '30',
+      [maxQuantity * 0.4]: '40',
+      [maxQuantity * 0.5]: '50',
+      [maxQuantity * 0.6]: '60',
+      [maxQuantity * 0.7]: '70',
+      [maxQuantity * 0.8]: '80',
+      [maxQuantity * 0.9]: '90',
+      [maxQuantity]: '100'
     };
 
     return (
