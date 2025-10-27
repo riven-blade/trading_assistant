@@ -161,20 +161,48 @@ func (pm *PriceMonitor) checkSingleEstimate(estimate *models.PriceEstimate) {
 
 // triggerEstimate 触发价格预估
 func (pm *PriceMonitor) triggerEstimate(estimate *models.PriceEstimate, currentPrice float64) {
-	// 执行自动下单
-	err := pm.orderExecutor.ExecuteOrder(estimate, currentPrice)
-	if err != nil {
-		logrus.Errorf("双向持仓订单执行失败: %v", err)
+	// 强制所有订单都通过队列执行
+	if GlobalOrderQueue == nil {
+		logrus.Error("订单队列未初始化，无法执行订单")
 
-		// 发送错误通知，包含详细的交易信息
+		// 发送错误通知
 		if telegram.GlobalTelegramClient != nil {
-			// 构建详细的错误消息
 			actionText := getActionText(estimate.ActionType)
 			positionText := getPositionText(estimate.Side)
 
-			errorMessage := fmt.Sprintf("双向持仓自动下单 - %s %s %s\n数量: %.6f\n目标价: %.4f\n当前价: %.6f",
+			errorMessage := fmt.Sprintf("系统错误 - 订单队列未初始化\n%s %s %s\n数量: %.6f\n目标价: %.4f\n当前价: %.6f",
 				estimate.Symbol, actionText, positionText,
 				estimate.Quantity, estimate.TargetPrice, currentPrice)
+
+			telegram.GlobalTelegramClient.SendError(errorMessage, fmt.Errorf("订单队列未初始化"))
+		}
+
+		// 更新预估状态为失败
+		estimate.Status = models.EstimateStatusFailed
+		estimate.UpdatedAt = time.Now()
+		err := redis.GlobalRedisClient.SetPriceEstimate(estimate)
+		if err != nil {
+			logrus.Errorf("更新价格预估状态失败: %v", err)
+		}
+
+		// 通过WebSocket广播价格预估更新
+		go utils.BroadcastSymbolEstimatesUpdate()
+		return
+	}
+
+	// 将订单任务加入队列
+	err := GlobalOrderQueue.EnqueueOrder(estimate, currentPrice)
+	if err != nil {
+		logrus.Errorf("将订单任务加入队列失败: %v", err)
+
+		// 发送错误通知
+		if telegram.GlobalTelegramClient != nil {
+			actionText := getActionText(estimate.ActionType)
+			positionText := getPositionText(estimate.Side)
+
+			errorMessage := fmt.Sprintf("订单入队失败 - %s %s %s\n数量: %.6f\n目标价: %.4f\n当前价: %.6f\n错误: %s",
+				estimate.Symbol, actionText, positionText,
+				estimate.Quantity, estimate.TargetPrice, currentPrice, err.Error())
 
 			telegram.GlobalTelegramClient.SendError(errorMessage, err)
 		}
@@ -182,11 +210,20 @@ func (pm *PriceMonitor) triggerEstimate(estimate *models.PriceEstimate, currentP
 		// 更新预估状态为失败
 		estimate.Status = models.EstimateStatusFailed
 	} else {
-		// 更新预估状态为已触发
-		estimate.Status = models.EstimateStatusTriggered
+		// 更新预估状态为排队中
+		estimate.Status = models.EstimateStatusQueued
 
 		// 广播预估触发事件
 		go pm.broadcastEstimateTriggerEvent(estimate, currentPrice)
+
+		logrus.WithFields(logrus.Fields{
+			"symbol":        estimate.Symbol,
+			"action_type":   estimate.ActionType,
+			"side":          estimate.Side,
+			"target_price":  estimate.TargetPrice,
+			"current_price": currentPrice,
+			"queue_size":    GlobalOrderQueue.GetQueueSize(),
+		}).Info("订单已加入执行队列")
 	}
 
 	estimate.UpdatedAt = time.Now()

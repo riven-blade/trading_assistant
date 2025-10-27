@@ -1,6 +1,6 @@
 import React from 'react';
 import { Tag } from 'antd';
-import { LineChartOutlined } from '@ant-design/icons';
+import { LineChartOutlined, CloseOutlined } from '@ant-design/icons';
 
 /**
  * 交易对卡片组件
@@ -59,6 +59,9 @@ const TradingPairCard = ({
     if (numVolume >= 1000) return `${(numVolume / 1000).toFixed(1)}K`;
     return numVolume.toFixed(0);
   };
+
+  // 判断是否可以删除：没有仓位且没有监听
+  const canRemove = canDeleteSymbol(symbol);
 
   return (
     <div className="trading-pair-card-clean">
@@ -129,6 +132,37 @@ const TradingPairCard = ({
             >
               <LineChartOutlined style={{ fontSize: '13px' }} />
             </button>
+            {/* 删除按钮 - 只在可以删除时显示 */}
+            {canRemove && (
+              <button
+                className="control-btn primary-btn kline-btn-icon"
+                onClick={() => onAction(symbol, 'delete')}
+                title="取消选中"
+                style={{
+                  padding: '0',
+                  fontSize: '12px',
+                  height: '24px',
+                  width: '24px',
+                  minWidth: '24px',
+                  minHeight: '24px',
+                  maxWidth: '24px',
+                  maxHeight: '24px',
+                  borderRadius: '50%',
+                  background: '#fef2f2',
+                  border: '1px solid #fecaca',
+                  color: '#dc2626',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  boxShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                  boxSizing: 'border-box',
+                  flexShrink: 0,
+                  transition: 'all 0.15s ease'
+                }}
+              >
+                <CloseOutlined style={{ fontSize: '12px' }} />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -139,18 +173,9 @@ const TradingPairCard = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
             {/* 标记价格 */}
             <div style={{ textAlign: 'center' }}>
-              <div style={{ fontSize: '18px', fontWeight: '700', color: '#1f2937', marginBottom: '4px' }}>
+              <div style={{ fontSize: '18px', fontWeight: '700', color: '#1f2937' }}>
                 ${formatPrice(priceInfo?.markPrice)}
               </div>
-              {priceInfo?.priceChangePercent && (
-                <div style={{ 
-                  fontSize: '13px', 
-                  fontWeight: '600',
-                  color: parseFloat(priceInfo.priceChangePercent) >= 0 ? '#059669' : '#dc2626'
-                }}>
-                  {formatPercent(priceInfo.priceChangePercent)}
-                </div>
-              )}
             </div>
             
             {/* 交易额显示 */}
@@ -228,15 +253,6 @@ const TradingPairCard = ({
             </>
           )}
         </div>
-        <button
-          className={`control-btn ${!canDeleteSymbol(symbol) ? 'secondary-btn' : 'danger-btn'} trading-control-btn`}
-          disabled={!canDeleteSymbol(symbol)}
-          onClick={() => onAction(symbol, 'delete')}
-          title={!canDeleteSymbol(symbol) ? getDeleteDisabledReason(symbol) : '删除交易对'}
-          style={{ marginTop: '4px', fontSize: '11px', width: '100%' }}
-        >
-          删除
-        </button>
       </div>
     </div>
   );

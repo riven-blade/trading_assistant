@@ -158,8 +158,8 @@ curl -X POST http://localhost:8080/api/v1/coins/sync \
 
 **重要配置**：
 ```bash
-# 余额比例阈值 - 当可用余额低于总余额的20%时停止开仓
-BALANCE_RATIO_THRESHOLD=20.0
+# 最大持仓数量 - 超过此数量不允许开新仓（加仓不受限制）
+MAX_POSITION_COUNT=10
 
 # 持仓模式 - both:双向持仓, single:单向持仓
 POSITION_MODE=both

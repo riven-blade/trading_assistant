@@ -152,6 +152,8 @@ func (b *BaseExchange) shouldRetry(err error) bool {
 		"unavailable", "overloaded", "rate limit",
 		"too many requests", "service unavailable",
 		"bad gateway", "gateway timeout",
+		"-1008", "server is currently overloaded", // Binance特定错误
+		"http 503", "http 502", "http 504", // HTTP状态码
 	}
 
 	for _, keyword := range retryableKeywords {

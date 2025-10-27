@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
+	"trading_assistant/core"
 	"trading_assistant/models"
 	"trading_assistant/pkg/exchanges/binance"
 	"trading_assistant/pkg/exchanges/types"
@@ -172,6 +174,114 @@ func (m *MonitorController) CancelOrder(ctx *gin.Context) {
 		"data": gin.H{
 			"order_id":    requestBody.OrderID,
 			"exchange_id": requestBody.ExchangeID,
+		},
+	})
+}
+
+// GetOrderQueueStatus 获取订单队列状态
+func (m *MonitorController) GetOrderQueueStatus(ctx *gin.Context) {
+	if core.GlobalOrderQueue == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "订单队列未初始化",
+		})
+		return
+	}
+
+	status := core.GlobalOrderQueue.GetStatus()
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    status,
+	})
+}
+
+// StartOrderQueue 启动订单队列
+func (m *MonitorController) StartOrderQueue(ctx *gin.Context) {
+	if core.GlobalOrderQueue == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "订单队列未初始化",
+		})
+		return
+	}
+
+	if core.GlobalOrderQueue.IsRunning() {
+		ctx.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "订单队列已在运行",
+		})
+		return
+	}
+
+	err := core.GlobalOrderQueue.Start()
+	if err != nil {
+		ctx.JSON(http.StatusInternalServerError, gin.H{
+			"error": fmt.Sprintf("启动订单队列失败: %v", err),
+		})
+		return
+	}
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "订单队列启动成功",
+	})
+}
+
+// StopOrderQueue 停止订单队列
+func (m *MonitorController) StopOrderQueue(ctx *gin.Context) {
+	if core.GlobalOrderQueue == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "订单队列未初始化",
+		})
+		return
+	}
+
+	if !core.GlobalOrderQueue.IsRunning() {
+		ctx.JSON(http.StatusOK, gin.H{
+			"success": true,
+			"message": "订单队列已停止",
+		})
+		return
+	}
+
+	core.GlobalOrderQueue.Stop()
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": "订单队列停止成功",
+	})
+}
+
+// SetOrderQueueWaitTime 设置订单队列等待时间
+func (m *MonitorController) SetOrderQueueWaitTime(ctx *gin.Context) {
+	if core.GlobalOrderQueue == nil {
+		ctx.JSON(http.StatusServiceUnavailable, gin.H{
+			"error": "订单队列未初始化",
+		})
+		return
+	}
+
+	secondsStr := ctx.Query("seconds")
+	if secondsStr == "" {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "请提供等待时间（秒）",
+		})
+		return
+	}
+
+	seconds, err := strconv.Atoi(secondsStr)
+	if err != nil || seconds < 0 {
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": "等待时间必须是非负整数",
+		})
+		return
+	}
+
+	duration := time.Duration(seconds) * time.Second
+	core.GlobalOrderQueue.SetWaitDuration(duration)
+
+	ctx.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"message": fmt.Sprintf("订单队列等待时间已设置为%d秒", seconds),
+		"data": gin.H{
+			"wait_duration": duration.String(),
 		},
 	})
 }

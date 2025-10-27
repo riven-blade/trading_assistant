@@ -22,6 +22,7 @@ const (
 // 价格预估状态常量
 const (
 	EstimateStatusListening = "listening" // 监听状态（默认状态）
+	EstimateStatusQueued    = "queued"    // 排队中
 	EstimateStatusTriggered = "triggered" // 已触发成功
 	EstimateStatusFailed    = "failed"    // 触发失败
 )

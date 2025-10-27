@@ -73,6 +73,7 @@ func main() {
 	}
 
 	// 初始化核心组件
+	core.InitOrderQueue(binanceClient)
 	core.InitPriceMonitor(binanceClient)
 	core.InitAccountManager(binanceClient)
 
@@ -87,6 +88,11 @@ func main() {
 	// 启动价格订阅
 	if err := marketManager.StartPriceSubscriptions(); err != nil {
 		logrus.Errorf("启动价格订阅失败: %v", err)
+	}
+
+	// 启动订单队列
+	if err := core.GlobalOrderQueue.Start(); err != nil {
+		logrus.Errorf("启动订单队列失败: %v", err)
 	}
 
 	// 启动价格监控
@@ -124,6 +130,10 @@ func gracefulShutdown(server *servers.HTTPServer, binanceClient *binance.Binance
 	}
 
 	// 停止核心组件
+	if core.GlobalOrderQueue != nil {
+		core.GlobalOrderQueue.Stop()
+	}
+
 	if core.GlobalAccountManager != nil {
 		core.GlobalAccountManager.Stop()
 	}

@@ -29,6 +29,7 @@ type PriceEstimateRequest struct {
 	OrderType   string  `json:"order_type"`   // 订单类型：market, limit
 	MarginMode  string  `json:"margin_mode"`  // CROSS, ISOLATED (默认CROSS)
 	TriggerType string  `json:"trigger_type"` // 触发类型
+	Enabled     *bool   `json:"enabled"`      // 是否启用，使用指针以区分未传和false
 }
 
 // validatePriceEstimateRequest 验证价格预估请求
@@ -200,7 +201,12 @@ func parseFloat(s string) float64 {
 
 // createPriceEstimateModel 创建价格预估模型
 func (p *PriceController) createPriceEstimateModel(req *PriceEstimateRequest) *models.PriceEstimate {
-	// 初始状态为待激活，等待用户手动启用
+	// 确定是否启用：如果请求中提供了enabled值则使用，否则默认为true
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
 	return &models.PriceEstimate{
 		ID:          uuid.New().String(),
 		Symbol:      req.Symbol,
@@ -213,7 +219,7 @@ func (p *PriceController) createPriceEstimateModel(req *PriceEstimateRequest) *m
 		MarginMode:  req.MarginMode,
 		TriggerType: req.TriggerType,
 		Status:      models.EstimateStatusListening, // 初始状态为监听状态
-		Enabled:     false,                          // 默认未启用，需要用户手动启用
+		Enabled:     enabled,                        // 默认启用，可通过请求参数控制
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}

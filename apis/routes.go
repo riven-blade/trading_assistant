@@ -83,6 +83,15 @@ func SetupRoutes(r *gin.Engine, binanceClient *binance.Binance, marketManager *c
 		{
 			monitor.GET("/orders", monitorController.GetOrders)           // 获取订单信息（Orders页面需要）
 			monitor.POST("/orders/cancel", monitorController.CancelOrder) // 取消订单
+
+			// 订单队列管理
+			queue := monitor.Group("/queue")
+			{
+				queue.GET("/status", monitorController.GetOrderQueueStatus)      // 获取订单队列状态
+				queue.POST("/start", monitorController.StartOrderQueue)          // 启动订单队列
+				queue.POST("/stop", monitorController.StopOrderQueue)            // 停止订单队列
+				queue.PUT("/wait-time", monitorController.SetOrderQueueWaitTime) // 设置等待时间
+			}
 		}
 
 		// K线分析路由

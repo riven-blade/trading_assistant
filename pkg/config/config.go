@@ -32,7 +32,7 @@ type Config struct {
 	PositionMode string // both: 双向持仓, single: 单向持仓
 
 	// 风险管理配置
-	BalanceRatioThreshold     float64 // 余额比例阈值，低于此比例不开仓
+	MaxPositionCount          int     // 最大持仓数量，超过此数量不允许开新仓
 	ShortFundingRateThreshold float64 // 做空资金费率阈值，低于此阈值不开空仓
 
 	// 认证配置
@@ -67,7 +67,7 @@ func LoadConfig() {
 
 		PositionMode: getEnv("POSITION_MODE", "both"),
 
-		BalanceRatioThreshold:     getEnvFloat("BALANCE_RATIO_THRESHOLD", 20.0),
+		MaxPositionCount:          getEnvInt("MAX_POSITION_COUNT", 10),                 // 默认最多10个仓位
 		ShortFundingRateThreshold: getEnvFloat("SHORT_FUNDING_RATE_THRESHOLD", -0.002), // 默认-0.2%
 
 		AdminUsername: getEnv("ADMIN_USERNAME", "admin"),

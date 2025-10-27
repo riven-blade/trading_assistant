@@ -170,7 +170,7 @@ POSITION_MODE=both  # both: 双向持仓, single: 单向持仓
 # =================
 # 风险管理
 # =================
-BALANCE_RATIO_THRESHOLD=20.0  # 余额比例阈值 (%)
+MAX_POSITION_COUNT=10  # 最大持仓数量，超过此数量不允许开新仓
 ```
 
 ### Binance API 配置

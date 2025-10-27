@@ -1,11 +1,11 @@
 import React from 'react';
-import { Drawer, Form, Typography, Tag, Select, Button } from 'antd';
+import { Drawer, Form, Typography, Tag, Select, Button, InputNumber } from 'antd';
 import TradingSlider from './TradingSlider';
 
 const { Text } = Typography;
 
 /**
- * 交易抽屉组件 - 以数量为主
+ * 交易抽屉组件 - 以开仓金额为主
  * @param {boolean} visible - 是否显示
  * @param {Function} onClose - 关闭回调
  * @param {string} symbol - 交易对
@@ -15,8 +15,8 @@ const { Text } = Typography;
  * @param {Object} accountValue - 账户信息
  * @param {number} targetPrice - 目标价格
  * @param {Function} onPriceChange - 价格变化回调
- * @param {number} quantity - 开仓数量
- * @param {Function} onQuantityChange - 数量变化回调
+ * @param {number} stakeAmount - 开仓金额 (USDT)
+ * @param {Function} onStakeAmountChange - 开仓金额变化回调
  * @param {string} orderType - 订单类型
  * @param {Function} onOrderTypeChange - 订单类型变化回调
  * @param {number} selectedLeverage - 杠杆
@@ -34,8 +34,8 @@ const TradeDrawer = ({
   accountValue,
   targetPrice,
   onPriceChange,
-  quantity,
-  onQuantityChange,
+  stakeAmount,
+  onStakeAmountChange,
   orderType,
   onOrderTypeChange,
   selectedLeverage,
@@ -47,9 +47,8 @@ const TradeDrawer = ({
   const markPrice = priceData?.[symbol]?.markPrice || 0;
   const baseAsset = symbol?.replace('USDT', '') || '';
   
-  // 计算预估USDT金额
+  // 计算价格（限价单使用目标价格，市价单使用当前价格）
   const getPriceForCalculation = () => {
-    // 限价单使用目标价格，市价单使用当前价格
     if (orderType === 'limit') {
       return targetPrice > 0 ? targetPrice : markPrice;
     }
@@ -57,17 +56,16 @@ const TradeDrawer = ({
   };
   
   const priceForCalculation = getPriceForCalculation();
-  const estimatedUsdtAmount = priceForCalculation > 0 && quantity > 0 ? (quantity * priceForCalculation) / selectedLeverage : 0;
   
-  // 计算最大数量
-  const getMaxQuantity = () => {
-    const maxUsdtAmount = 100;
-    // 使用与保证金计算相同的价格逻辑
-    const priceToUse = getPriceForCalculation();
-    if (priceToUse <= 0) return 1;
-    const maxQuantity = (maxUsdtAmount * selectedLeverage) / priceToUse;
-    return parseFloat(maxQuantity.toFixed(6));
+  // 根据开仓金额和价格计算数量
+  const calculateQuantity = () => {
+    if (priceForCalculation <= 0 || !stakeAmount || stakeAmount <= 0) return 0;
+    // 数量 = (开仓金额 * 杠杆) / 价格
+    const qty = (stakeAmount * selectedLeverage) / priceForCalculation;
+    return parseFloat(qty.toFixed(6));
   };
+  
+  const quantity = calculateQuantity();
   
   // 获取价格范围 (当前价格的 ±100%)
   const getPriceRange = () => {
@@ -129,8 +127,8 @@ const TradeDrawer = ({
           
           {/* 交易参数 */}
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text type="secondary">开仓数量:</Text>
-            <Text strong style={{ color: '#52c41a', fontSize: '16px' }}>{quantity?.toFixed(6) || '0.000000'} {baseAsset}</Text>
+            <Text type="secondary">开仓金额:</Text>
+            <Text strong style={{ color: '#1890ff', fontSize: '16px' }}>${stakeAmount?.toFixed(2) || '0.00'} USDT</Text>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
             <Text type="secondary">杠杆倍数:</Text>
@@ -143,8 +141,8 @@ const TradeDrawer = ({
             </Text>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text type="secondary">预估保证金:</Text>
-            <Text strong>{estimatedUsdtAmount?.toFixed(2) || '0.00'} USDT</Text>
+            <Text type="secondary">开仓数量:</Text>
+            <Text strong style={{ color: '#52c41a', fontSize: '16px' }}>{quantity?.toFixed(6) || '0.000000'} {baseAsset}</Text>
           </div>
           {orderType === 'limit' && (
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -188,31 +186,37 @@ const TradeDrawer = ({
           </Form.Item>
         )}
 
-        {/* 开仓数量设置 */}
-        <Form.Item>
-          <TradingSlider
-            title={`${baseAsset}数量`}
-            value={quantity || (getMaxQuantity() * 0.1)}
-            min={0.001}
-            max={getMaxQuantity()}
-            step={0.001}
-            onChange={onQuantityChange}
-            marks={{
-              [getMaxQuantity() * 0.1]: '10',
-              [getMaxQuantity() * 0.2]: '20',
-              [getMaxQuantity() * 0.3]: '30',
-              [getMaxQuantity() * 0.4]: '40',
-              [getMaxQuantity() * 0.5]: '50',
-              [getMaxQuantity() * 0.6]: '60',
-              [getMaxQuantity() * 0.7]: '70',
-              [getMaxQuantity() * 0.8]: '80',
-              [getMaxQuantity() * 0.9]: '90',
-              [getMaxQuantity()]: '100'
-            }}
-            displayLabel="开仓数量:"
-            displayValue={`${(quantity || 0)?.toFixed(6)} ${baseAsset}`}
-            tooltipFormatter={(value) => `${value?.toFixed(6)} ${baseAsset}`}
+        {/* 开仓金额输入 */}
+        <Form.Item label={<span style={{ fontSize: '14px', fontWeight: '500' }}>开仓金额 (USDT)</span>}>
+          <InputNumber
+            value={stakeAmount}
+            onChange={onStakeAmountChange}
+            min={0}
+            max={accountValue?.usdt_free || 10000}
+            step={10}
+            precision={2}
+            style={{ width: '100%' }}
+            size="large"
+            placeholder="请输入开仓金额"
+            addonAfter="USDT"
           />
+          <div style={{ 
+            marginTop: 8, 
+            display: 'flex', 
+            gap: 8,
+            flexWrap: 'wrap'
+          }}>
+            {[10, 20, 50, 100, 200, 300].map(amount => (
+              <Button
+                key={amount}
+                size="small"
+                onClick={() => onStakeAmountChange(amount)}
+                style={{ flex: '1 1 auto', minWidth: '60px' }}
+              >
+                ${amount}
+              </Button>
+            ))}
+          </div>
         </Form.Item>
 
 

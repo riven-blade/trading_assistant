@@ -6,7 +6,9 @@ import {
   Typography, 
   message,
   Spin,
-  Empty
+  Empty,
+  InputNumber,
+  Button
 } from 'antd';
 import api, { toggleEstimateEnabled } from '../services/api';
 import { calculateUsdtAmount, calculatePnl } from '../utils/precision';
@@ -32,6 +34,7 @@ const Positions = () => {
   const [markPrice, setMarkPrice] = useState(0);
   const [targetPrice, setTargetPrice] = useState(0);
   const [quantity, setQuantity] = useState(0);
+  const [additionAmount, setAdditionAmount] = useState(0); // 加仓金额 (USDT)
   const [pricePercentage, setPricePercentage] = useState(0);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
@@ -167,13 +170,13 @@ const Positions = () => {
     const basePrice = priceBase === 'current' ? price : entryPrice;
     let defaultTargetPrice = basePrice * (1 + defaultPercentage / 100);
 
-    // 设置默认数量
+    // 设置默认数量或金额
     let defaultQuantity;
     if (action === 'addition') {
-      // 加仓：默认为基于100 USDT的10%
-      const maxUsdtAmount = 100;
-      const maxQuantity = (maxUsdtAmount * position.leverage) / defaultTargetPrice;
-      defaultQuantity = maxQuantity * 0.1; // 10%
+      // 加仓：设置默认金额为100 USDT
+      setAdditionAmount(100);
+      // 根据金额计算数量
+      defaultQuantity = (100 * position.leverage) / defaultTargetPrice;
     } else {
       // 止盈/止损：持仓数量的50%
       defaultQuantity = Math.abs(position.size) * 0.5;
@@ -201,16 +204,27 @@ const Positions = () => {
     
     setTargetPrice(newTargetPrice);
     
-    // 对于加仓，价格变化时需要调整数量以保持在最大范围内
-    if (actionType === 'addition') {
-      const maxUsdtAmount = 100; // 固定100 USDT
-      const newMaxQuantity = (maxUsdtAmount * currentPosition.leverage) / newTargetPrice;
-      
-      // 如果当前数量超过了新的最大数量，调整到最大数量
-      if (quantity > newMaxQuantity) {
-        const adjustedQuantity = newMaxQuantity;
-        setQuantity(adjustedQuantity);
-      }
+    // 对于加仓，价格变化时根据金额重新计算数量
+    if (actionType === 'addition' && additionAmount > 0) {
+      const newQuantity = (additionAmount * currentPosition.leverage) / newTargetPrice;
+      setQuantity(parseFloat(newQuantity.toFixed(6)));
+    }
+  };
+
+  // 加仓金额变化处理
+  const handleAdditionAmountChange = (value) => {
+    setAdditionAmount(value || 0);
+    
+    if (!currentPosition || !value || value <= 0) {
+      setQuantity(0);
+      return;
+    }
+    
+    // 根据金额和价格计算数量
+    const priceToUse = targetPrice > 0 ? targetPrice : markPrice;
+    if (priceToUse > 0) {
+      const calculatedQuantity = (value * currentPosition.leverage) / priceToUse;
+      setQuantity(parseFloat(calculatedQuantity.toFixed(6)));
     }
   };
 
@@ -256,8 +270,8 @@ const Positions = () => {
         leverage: currentPosition.leverage,
         margin_mode: currentPosition.margin_mode || 'isolated',
         order_type: 'limit',
-        trigger_type: 'condition'
-        // created_by字段已移除
+        trigger_type: 'condition',
+        enabled: true  // 默认开启监听
       };
 
       await api.post('/estimates', orderData);
@@ -510,15 +524,64 @@ const Positions = () => {
               config={ACTIONS[actionType]}
             />
 
-            {/* 数量滑块 */}
-            <QuantitySlider
-              action={actionType}
-              quantity={quantity}
-              maxQuantity={getMaxQuantity()}
-              onQuantityChange={handleQuantitySliderChange}
-              symbol={currentPosition.symbol}
-              config={ACTIONS[actionType]}
-            />
+            {/* 数量滑块（止盈/止损）或金额输入（加仓） */}
+            {actionType === 'addition' ? (
+              <div style={{ marginBottom: 24 }}>
+                <div style={{ 
+                  fontSize: '14px', 
+                  fontWeight: '500', 
+                  marginBottom: 8,
+                  color: '#374151'
+                }}>
+                  加仓金额 (USDT)
+                </div>
+                <InputNumber
+                  value={additionAmount}
+                  onChange={handleAdditionAmountChange}
+                  min={0}
+                  max={accountValue?.usdt_free || 10000}
+                  step={10}
+                  precision={2}
+                  style={{ width: '100%' }}
+                  size="large"
+                  placeholder="请输入加仓金额"
+                  addonAfter="USDT"
+                />
+                <div style={{ 
+                  marginTop: 8, 
+                  display: 'flex', 
+                  gap: 8,
+                  flexWrap: 'wrap'
+                }}>
+                  {[10, 20, 50, 100, 200, 300].map(amount => (
+                    <Button
+                      key={amount}
+                      size="small"
+                      onClick={() => handleAdditionAmountChange(amount)}
+                      style={{ flex: '1 1 auto', minWidth: '60px' }}
+                    >
+                      ${amount}
+                    </Button>
+                  ))}
+                </div>
+                <div style={{ 
+                  marginTop: 8,
+                  fontSize: '12px',
+                  color: '#6b7280'
+                }}>
+                  当前数量: <span style={{ color: '#10b981', fontWeight: 600 }}>{quantity.toFixed(6)}</span> {currentPosition.symbol.replace('USDT', '')}
+                </div>
+              </div>
+            ) : (
+              <QuantitySlider
+                action={actionType}
+                quantity={quantity}
+                maxQuantity={getMaxQuantity()}
+                onQuantityChange={handleQuantitySliderChange}
+                symbol={currentPosition.symbol}
+                config={ACTIONS[actionType]}
+              />
+            )}
 
             {/* 金额显示 */}
             <div style={{ 

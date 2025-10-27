@@ -47,9 +47,9 @@ func (oe *OrderExecutor) ExecuteOrder(estimate *models.PriceEstimate, currentPri
 		"current_price": currentPrice,
 	}).Info("开始执行双向持仓订单")
 
-	// 余额检查（仅对开仓和加仓操作）
-	if estimate.ActionType == models.ActionTypeOpen || estimate.ActionType == models.ActionTypeAddition {
-		if err := oe.checkBalanceRatio(estimate); err != nil {
+	// 仓位数量检查
+	if estimate.ActionType == models.ActionTypeOpen {
+		if err := oe.checkPositionCount(estimate); err != nil {
 			return err
 		}
 	}
@@ -84,12 +84,9 @@ func (oe *OrderExecutor) ExecuteOrder(estimate *models.PriceEstimate, currentPri
 	}
 
 	// 更新预估状态
-	if err := oe.updateEstimateStatus(estimate, "triggered"); err != nil {
+	if err := oe.updateEstimateStatus(estimate, models.EstimateStatusTriggered); err != nil {
 		logrus.Errorf("更新预估状态失败: %v", err)
 	}
-
-	// 发送通知
-	oe.sendOrderNotification(estimate, order, orderParams)
 
 	logrus.WithFields(logrus.Fields{
 		"order_id":     order.ExchangeID,
@@ -464,45 +461,27 @@ func (oe *OrderExecutor) validatePositionForReduce(symbol, positionSide string, 
 	return nil
 }
 
-// checkBalanceRatio 检查余额比例是否满足开仓要求
-func (oe *OrderExecutor) checkBalanceRatio(estimate *models.PriceEstimate) error {
-	// 从Redis获取余额信息
-	if redis.GlobalRedisClient == nil {
-		logrus.Warn("Redis客户端未初始化，跳过余额检查")
+// checkPositionCount 检查持仓数量是否超过限制
+func (oe *OrderExecutor) checkPositionCount(estimate *models.PriceEstimate) error {
+	// 获取最大持仓数量限制
+	maxPositionCount := config.GlobalConfig.MaxPositionCount
+	if maxPositionCount <= 0 {
+		logrus.Warn("最大持仓数量未配置或配置错误，跳过仓位数量检查")
 		return nil
 	}
 
-	var balanceSummary map[string]interface{}
-	err := redis.GlobalRedisClient.GetBalancesRealtime(&balanceSummary)
+	// 获取当前所有持仓
+	positions, err := oe.binanceClient.FetchPositions(oe.ctx, nil, nil)
 	if err != nil {
-		logrus.Warnf("从Redis获取余额失败: %v，跳过余额检查", err)
+		logrus.Warnf("获取持仓信息失败: %v，跳过仓位数量检查", err)
 		return nil
 	}
 
-	// 获取USDT余额信息
-	usdtTotal, totalOk := balanceSummary["usdt_total"].(float64)
-	usdtFree, freeOk := balanceSummary["usdt_free"].(float64)
+	// 统计当前有持仓的币对数量
+	currentPositionCount := len(positions)
 
-	if !totalOk || !freeOk {
-		logrus.Warn("余额数据格式错误，跳过余额检查")
-		return nil
-	}
-
-	// 计算可用余额占总余额的比例
-	if usdtTotal <= 0 {
-		return fmt.Errorf("USDT总余额为0，无法进行交易")
-	}
-
-	availableRatio := (usdtFree / usdtTotal) * 100
-
-	// 检查是否低于阈值
-	threshold := config.GlobalConfig.BalanceRatioThreshold
-	if availableRatio < threshold {
-		actionText := "开仓"
-		if estimate.ActionType == models.ActionTypeAddition {
-			actionText = "加仓"
-		}
-
+	// 检查是否超过最大持仓数量
+	if currentPositionCount >= maxPositionCount {
 		positionText := "多头"
 		if estimate.Side == types.PositionSideShort {
 			positionText = "空头"
@@ -510,41 +489,34 @@ func (oe *OrderExecutor) checkBalanceRatio(estimate *models.PriceEstimate) error
 
 		// 发送Telegram通知
 		if telegram.GlobalTelegramClient != nil {
-			message := fmt.Sprintf("余额不足，%s操作取消\n"+
+			message := fmt.Sprintf("持仓数量已达上限，开仓操作取消\n"+
 				"币对: %s\n"+
-				"方向: %s %s\n"+
-				"原因: 可用余额比例 %.1f%% 低于阈值 %.1f%%\n"+
-				"USDT余额: %.2f / %.2f",
-				actionText, estimate.Symbol, actionText, positionText,
-				availableRatio, threshold,
-				usdtFree, usdtTotal)
+				"方向: 开仓 %s\n"+
+				"原因: 当前持仓数量 %d 已达到上限 %d",
+				estimate.Symbol, positionText,
+				currentPositionCount, maxPositionCount)
 
 			if err := telegram.GlobalTelegramClient.SendMessage(message); err != nil {
-				logrus.Errorf("发送余额不足通知失败: %v", err)
+				logrus.Errorf("发送持仓数量限制通知失败: %v", err)
 			}
 		}
 
 		logrus.WithFields(logrus.Fields{
-			"symbol":          estimate.Symbol,
-			"action_type":     estimate.ActionType,
-			"side":            estimate.Side,
-			"available_ratio": availableRatio,
-			"threshold":       threshold,
-			"usdt_free":       usdtFree,
-			"usdt_total":      usdtTotal,
-		}).Warn("余额比例低于阈值，取消交易")
+			"symbol":                 estimate.Symbol,
+			"side":                   estimate.Side,
+			"current_position_count": currentPositionCount,
+			"max_position_count":     maxPositionCount,
+		}).Warn("持仓数量已达上限，取消开仓")
 
-		return fmt.Errorf("可用余额比例 %.1f%% 低于阈值 %.1f%%，%s操作已取消",
-			availableRatio, threshold, actionText)
+		return fmt.Errorf("当前持仓数量 %d 已达到上限 %d，开仓操作已取消",
+			currentPositionCount, maxPositionCount)
 	}
 
 	logrus.WithFields(logrus.Fields{
-		"symbol":          estimate.Symbol,
-		"available_ratio": availableRatio,
-		"threshold":       threshold,
-		"usdt_free":       usdtFree,
-		"usdt_total":      usdtTotal,
-	}).Info("余额检查通过")
+		"symbol":                 estimate.Symbol,
+		"current_position_count": currentPositionCount,
+		"max_position_count":     maxPositionCount,
+	}).Info("仓位数量检查通过")
 
 	return nil
 }

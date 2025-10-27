@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { 
-  Drawer, 
-  Input, 
-  Typography, 
+import {
+  Drawer,
+  Input,
+  Typography,
   message,
   Spin,
   Empty,
-  Badge,
   Tag,
   Select,
   Table,
@@ -69,7 +68,7 @@ const TradingPairs = () => {
   const [selectedLeverage, setSelectedLeverage] = useState(DEFAULT_CONFIG.leverage);
   const [targetPrice, setTargetPrice] = useState(0);
   const [orderType, setOrderType] = useState(DEFAULT_CONFIG.orderType);
-  const [quantity, setQuantity] = useState(0.001);
+  const [stakeAmount, setStakeAmount] = useState(0); // 开仓金额 (USDT)
   const [marginMode, setMarginMode] = useState(DEFAULT_CONFIG.marginMode); // 默认全仓模式
 
   // 监控抽屉相关状态
@@ -77,6 +76,9 @@ const TradingPairs = () => {
   const [selectedMonitorSymbol, setSelectedMonitorSymbol] = useState('');
   const [symbolEstimatesData, setSymbolEstimatesData] = useState([]);
   const [estimatesLoading, setEstimatesLoading] = useState(false);
+
+  // 币种过滤相关状态
+  const [coinFilter, setCoinFilter] = useState([]); // 币种筛选
 
   // 使用自定义Hooks
   const { 
@@ -127,6 +129,7 @@ const TradingPairs = () => {
       setGlobalVolumeRanks(ranks);
     }
   }, [allPairs]);
+
 
   // 搜索过滤和排序
   useEffect(() => {
@@ -327,9 +330,8 @@ const TradingPairs = () => {
     }
     setTargetPrice(initialPrice);
     
-    // 计算默认开仓数量
-    const defaultQuantity = getDefaultQuantity(symbol, initialPrice);
-    setQuantity(defaultQuantity);
+    // 设置默认开仓金额为100 USDT
+    setStakeAmount(100);
     
     // 重置状态到默认值
     setSelectedLeverage(DEFAULT_CONFIG.leverage);
@@ -337,15 +339,6 @@ const TradingPairs = () => {
     setMarginMode(DEFAULT_CONFIG.marginMode);
     
     setTradeModalVisible(true);
-  };
-
-  // 计算默认开仓数量（10%）
-  const getDefaultQuantity = (symbol, price) => {
-    if (!price) return 0.001;
-    const maxUsdtAmount = 100; // 固定100 USDT
-    const maxQuantity = (maxUsdtAmount * selectedLeverage) / price;
-    const defaultQuantity = maxQuantity * 0.1; // 默认为最大数量的10%
-    return Math.max(0.001, parseFloat(defaultQuantity.toFixed(6)));
   };
 
   const getCurrentPrice = () => {
@@ -363,6 +356,7 @@ const TradingPairs = () => {
         openTradeModal(symbol, 'short');
         break;
       case 'delete':
+      case 'remove':
         removePair(symbol);
         break;
       case 'kline':
@@ -400,9 +394,9 @@ const TradingPairs = () => {
         return;
       }
 
-      // 检查开仓数量
-      if (!quantity || quantity <= 0) {
-        message.error('请设置有效的开仓数量');
+      // 检查开仓金额
+      if (!stakeAmount || stakeAmount <= 0) {
+        message.error('请设置有效的开仓金额');
         return;
       }
       
@@ -416,6 +410,16 @@ const TradingPairs = () => {
         }
       }
 
+      // 根据开仓金额和价格计算数量
+      // 数量 = (开仓金额 * 杠杆) / 价格
+      const calculatedQuantity = (stakeAmount * selectedLeverage) / orderPrice;
+      const quantity = parseFloat(calculatedQuantity.toFixed(6));
+
+      if (!quantity || quantity <= 0) {
+        message.error('计算的开仓数量无效，请调整开仓金额或杠杆');
+        return;
+      }
+
       const orderData = {
         symbol: selectedTradeSymbol,
         side: tradeSide,
@@ -425,8 +429,8 @@ const TradingPairs = () => {
         leverage: selectedLeverage,
         margin_mode: marginMode,
         order_type: orderType,
-        trigger_type: 'condition'
-        // created_by字段已移除
+        trigger_type: 'condition',
+        enabled: true  // 默认开启监听
       };
 
       await api.post('/estimates', orderData);
@@ -436,7 +440,7 @@ const TradingPairs = () => {
       
       const baseAsset = selectedTradeSymbol.replace('USDT', '');
       const marginModeText = marginMode === 'CROSS' ? '全仓' : '逐仓';
-      message.success(`${actionText}预估价已创建 | ${orderTypeText}单 ${selectedLeverage}x杠杆 ${marginModeText} ${quantity} ${baseAsset}`);
+      message.success(`${actionText}预估价已创建 | ${orderTypeText}单 ${selectedLeverage}x杠杆 ${marginModeText} ${quantity} ${baseAsset} (${stakeAmount} USDT)`);
       setTradeModalVisible(false);
     } catch (error) {
       message.error('创建订单失败: ' + (error.response?.data?.error || error.message));
@@ -528,6 +532,28 @@ const TradingPairs = () => {
 
   // 页面操作配置
   const headerActions = [
+    <Select
+      key="filter"
+      mode="multiple"
+      placeholder="筛选币种"
+      value={coinFilter}
+      onChange={setCoinFilter}
+      style={{ width: isMobile ? 150 : 300, minWidth: 150 }}
+      allowClear
+      maxTagCount={1}
+      maxTagPlaceholder={(omittedValues) => `+${omittedValues.length}个币种`}
+      showSearch
+      filterOption={(input, option) =>
+        (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+      }
+      virtual={false}
+      listHeight={256}
+      getPopupContainer={(trigger) => trigger.parentElement}
+      options={selectedPairs.map(pair => ({
+        label: pair.symbol,
+        value: pair.symbol
+      }))}
+    />,
     <button 
       key="refresh"
       className="control-btn primary-btn trading-pairs-header-btn"
@@ -567,17 +593,17 @@ const TradingPairs = () => {
         actions={headerActions}
       />
 
-      <div style={{ marginBottom: 16 }}>
-        <Badge count={selectedPairs.length} offset={[10, 0]}>
-          <Text strong>已选中的交易对</Text>
-        </Badge>
-      </div>
-
       {selectedPairs.length === 0 ? (
         <Empty description="暂无选中的交易对" />
       ) : (
         <Row gutter={[16, 16]}>
           {selectedPairs
+            .filter(pair => {
+              // 如果没有选择筛选条件，显示全部
+              if (coinFilter.length === 0) return true;
+              // 否则只显示选中的币种
+              return coinFilter.includes(pair.symbol);
+            })
             .sort((a, b) => {
               // 按交易额降序排序
               const aVolume = parseFloat(a.quote_volume || '0');
@@ -877,8 +903,8 @@ const TradingPairs = () => {
         accountValue={accountValue}
         targetPrice={targetPrice}
         onPriceChange={handlePriceChange}
-        quantity={quantity}
-        onQuantityChange={setQuantity}
+        stakeAmount={stakeAmount}
+        onStakeAmountChange={setStakeAmount}
         orderType={orderType}
         onOrderTypeChange={handleOrderTypeChange}
         selectedLeverage={selectedLeverage}

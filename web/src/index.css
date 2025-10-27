@@ -530,6 +530,25 @@ code {
   letter-spacing: -0.01em;
 }
 
+/* 删除按钮样式 - 圆形红色按钮（桌面版） */
+.trading-header-clean .control-btn.kline-btn-icon[title="取消选中"] {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #dc2626;
+}
+
+.trading-header-clean .control-btn.kline-btn-icon[title="取消选中"]:hover {
+  background: #fee2e2;
+  border-color: #fca5a5;
+  color: #b91c1c;
+  transform: scale(1.05);
+}
+
+.trading-header-clean .control-btn.kline-btn-icon[title="取消选中"]:active {
+  transform: scale(0.95);
+  box-shadow: 0 1px 1px rgba(0,0,0,0.1);
+}
+
 .estimate-badge {
   background: #fef3c7;
   color: #92400e;
@@ -565,7 +584,9 @@ code {
 /* 价格区域 */
 .trading-price-section {
   flex: 1;
-  margin-bottom: 16px;
+  margin-bottom: 12px;
+  display: flex;
+  flex-direction: column;
 }
 
 /* 交易控制 */

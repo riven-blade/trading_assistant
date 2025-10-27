@@ -1457,95 +1457,150 @@ func (b *Binance) GetUserDataStats() map[string]interface{} {
 
 // ========== 期货交易API ==========
 
-// FuturesNewOrder 期货下单 - 支持双向持仓
+// FuturesNewOrder 期货下单 - 支持双向持仓，带重试机制
 func (b *Binance) FuturesNewOrder(params map[string]interface{}) (*FuturesOrderResponse, error) {
 	endpoint := "/fapi/v1/order"
 
-	// 添加时间戳
-	params["timestamp"] = b.GetServerTime()
-
-	// 签名请求
-	path, headers, body, err := b.signRequest("POST", endpoint, params)
-	if err != nil {
-		return nil, fmt.Errorf("签名请求失败: %v", err)
-	}
-
-	// 发送请求
-	response, err := b.Request(context.Background(), b.getAPIURL()+path, "POST", headers, body, nil)
-	if err != nil {
-		return nil, fmt.Errorf("发送下单请求失败: %v", err)
-	}
-
-	// 检查HTTP状态码
-	if response.StatusCode != 200 && response.StatusCode != 201 {
-		// 尝试解析错误响应
-		var errorResp struct {
-			Code int    `json:"code"`
-			Msg  string `json:"msg"`
+	// 使用重试机制执行下单操作
+	result, err := b.RetryWithBackoffAndResult(context.Background(), func() (interface{}, error) {
+		// 重新设置时间戳（每次重试都需要新的时间戳）
+		currentParams := make(map[string]interface{})
+		for k, v := range params {
+			currentParams[k] = v
 		}
-		if err := json.Unmarshal(response.Body, &errorResp); err == nil {
-			return nil, fmt.Errorf("binance下单失败 [%d]: %s (HTTP %d)",
-				errorResp.Code, errorResp.Msg, response.StatusCode)
+		currentParams["timestamp"] = b.GetServerTime()
+
+		// 签名请求
+		path, headers, body, signErr := b.signRequest("POST", endpoint, currentParams)
+		if signErr != nil {
+			// 签名错误不应重试
+			return nil, fmt.Errorf("签名请求失败: %v", signErr)
 		}
-		return nil, fmt.Errorf("binance下单失败: HTTP %d, 响应: %s",
-			response.StatusCode, string(response.Body))
+
+		// 发送请求
+		response, reqErr := b.Request(context.Background(), b.getAPIURL()+path, "POST", headers, body, nil)
+		if reqErr != nil {
+			return nil, fmt.Errorf("发送下单请求失败: %v", reqErr)
+		}
+
+		// 检查HTTP状态码
+		if response.StatusCode != 200 && response.StatusCode != 201 {
+			// 尝试解析错误响应
+			var errorResp struct {
+				Code int    `json:"code"`
+				Msg  string `json:"msg"`
+			}
+			if parseErr := json.Unmarshal(response.Body, &errorResp); parseErr == nil {
+				// 创建包含完整信息的错误，便于重试机制判断
+				return nil, fmt.Errorf("binance下单失败 %d: %s (HTTP %d)",
+					errorResp.Code, errorResp.Msg, response.StatusCode)
+			}
+			return nil, fmt.Errorf("binance下单失败: HTTP %d, 响应: %s",
+				response.StatusCode, string(response.Body))
+		}
+
+		// 解析成功响应
+		var orderResp FuturesOrderResponse
+		if parseErr := json.Unmarshal(response.Body, &orderResp); parseErr != nil {
+			return nil, fmt.Errorf("解析下单响应失败: %v, 响应内容: %s", parseErr, string(response.Body))
+		}
+
+		// 验证订单ID
+		if orderResp.OrderID == 0 {
+			return nil, fmt.Errorf("下单失败: 返回的OrderID为0, 响应: %+v", orderResp)
+		}
+
+		return &orderResp, nil
+	})
+
+	if err != nil {
+		return nil, err
 	}
 
-	var orderResp FuturesOrderResponse
-	if err := json.Unmarshal(response.Body, &orderResp); err != nil {
-		return nil, fmt.Errorf("解析下单响应失败: %v, 响应内容: %s", err, string(response.Body))
+	// 类型断言返回结果
+	if orderResp, ok := result.(*FuturesOrderResponse); ok {
+		return orderResp, nil
 	}
 
-	// 验证订单ID
-	if orderResp.OrderID == 0 {
-		return nil, fmt.Errorf("下单失败: 返回的OrderID为0, 响应: %+v", orderResp)
-	}
-
-	return &orderResp, nil
+	return nil, fmt.Errorf("下单响应类型错误: %T", result)
 }
 
-// SetLeverage 设置杠杆
+// SetLeverage 设置杠杆，带重试机制
 func (b *Binance) SetLeverage(symbol string, leverage int) error {
-	params := map[string]interface{}{
-		"symbol":    symbol,
-		"leverage":  leverage,
-		"timestamp": b.GetServerTime(),
-	}
-
 	endpoint := "/fapi/v1/leverage"
-	path, headers, body, err := b.signRequest("POST", endpoint, params)
-	if err != nil {
-		return fmt.Errorf("签名设置杠杆请求失败: %v", err)
-	}
 
-	_, err = b.Request(context.Background(), b.getAPIURL()+path, "POST", headers, body, nil)
-	if err != nil {
-		return fmt.Errorf("设置杠杆失败: %v", err)
-	}
+	return b.RetryWithBackoff(context.Background(), func() error {
+		params := map[string]interface{}{
+			"symbol":    symbol,
+			"leverage":  leverage,
+			"timestamp": b.GetServerTime(),
+		}
 
-	return nil
+		path, headers, body, err := b.signRequest("POST", endpoint, params)
+		if err != nil {
+			return fmt.Errorf("签名设置杠杆请求失败: %v", err)
+		}
+
+		response, err := b.Request(context.Background(), b.getAPIURL()+path, "POST", headers, body, nil)
+		if err != nil {
+			return fmt.Errorf("设置杠杆失败: %v", err)
+		}
+
+		// 检查响应状态码
+		if response.StatusCode != 200 && response.StatusCode != 201 {
+			var errorResp struct {
+				Code int    `json:"code"`
+				Msg  string `json:"msg"`
+			}
+			if parseErr := json.Unmarshal(response.Body, &errorResp); parseErr == nil {
+				return fmt.Errorf("设置杠杆失败 %d: %s (HTTP %d)",
+					errorResp.Code, errorResp.Msg, response.StatusCode)
+			}
+			return fmt.Errorf("设置杠杆失败: HTTP %d, 响应: %s",
+				response.StatusCode, string(response.Body))
+		}
+
+		return nil
+	})
 }
 
-// SetMarginType 设置保证金模式
+// SetMarginType 设置保证金模式，带重试机制
 func (b *Binance) SetMarginType(symbol string, marginType string) error {
-	params := map[string]interface{}{
-		"symbol":     symbol,
-		"marginType": marginType, // ISOLATED 或 CROSSED
-		"timestamp":  time.Now().UnixMilli(),
-	}
-
 	endpoint := "/fapi/v1/marginType"
-	path, headers, body, err := b.signRequest("POST", endpoint, params)
-	if err != nil {
-		return fmt.Errorf("签名设置保证金模式请求失败: %v", err)
-	}
 
-	_, err = b.Request(context.Background(), b.getAPIURL()+path, "POST", headers, body, nil)
-	if err != nil {
-		return fmt.Errorf("设置保证金模式失败: %v", err)
-	}
+	return b.RetryWithBackoff(context.Background(), func() error {
+		params := map[string]interface{}{
+			"symbol":     symbol,
+			"marginType": marginType, // ISOLATED 或 CROSSED
+			"timestamp":  b.GetServerTime(),
+		}
 
-	return nil
+		path, headers, body, err := b.signRequest("POST", endpoint, params)
+		if err != nil {
+			return fmt.Errorf("签名设置保证金模式请求失败: %v", err)
+		}
+
+		response, err := b.Request(context.Background(), b.getAPIURL()+path, "POST", headers, body, nil)
+		if err != nil {
+			return fmt.Errorf("设置保证金模式失败: %v", err)
+		}
+
+		// 检查响应状态码
+		if response.StatusCode != 200 && response.StatusCode != 201 {
+			var errorResp struct {
+				Code int    `json:"code"`
+				Msg  string `json:"msg"`
+			}
+			if parseErr := json.Unmarshal(response.Body, &errorResp); parseErr == nil {
+				return fmt.Errorf("设置保证金模式失败 %d: %s (HTTP %d)",
+					errorResp.Code, errorResp.Msg, response.StatusCode)
+			}
+			return fmt.Errorf("设置保证金模式失败: HTTP %d, 响应: %s",
+				response.StatusCode, string(response.Body))
+		}
+
+		return nil
+	})
 }
 
 // getAPIURL 获取API基础URL
